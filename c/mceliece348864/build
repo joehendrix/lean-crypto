@@ -1,0 +1,5 @@
+#!/bin/sh
+set -ex
+INCLUDE="-I/usr/local/Cellar/openssl@1.1/1.1.1l_1/include -I../include"
+LIB_DIRS="-L/usr/local/Cellar/openssl@1.1/1.1.1l_1/lib -L../references/XKCP/bin/generic64"
+gcc -O3 -march=native -mtune=native -Wall -I. -Isubroutines $INCLUDE $LIB_DIRS -DKAT -DKATNUM=`cat KATNUM` "-DCRYPTO_NAMESPACE(x)=x" "-D_CRYPTO_NAMESPACE(x)=_##x" -o kat nist/kat_kem.c nist/rng.c benes.c bm.c controlbits.c decrypt.c encrypt.c gf.c operations.c pk_gen.c root.c sk_gen.c synd.c transpose.c util.c -lXKCP -lcrypto -ldl 
