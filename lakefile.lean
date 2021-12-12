@@ -17,7 +17,11 @@ def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
   let oFile := pkgDir / buildDir / cDir / "bindings.o"
   let srcTarget := inputFileTarget <| pkgDir / cDir / "bindings.cpp"
   fileTargetWithDep oFile srcTarget fun srcFile => do
-    compileO oFile srcFile #["-I", (← getLeanIncludeDir).toString] "c++"
+    IO.println $ "Lean: " ++ (← getLeanIncludeDir).toString
+    compileO oFile srcFile 
+      #["-DKATNUM=10",
+        "-I", (pkgDir / cDir / "mceliece348864").toString,
+        "-I", (← getLeanIncludeDir).toString] "c++"
 
 def mcelieceFiles : Array FilePath := 
   let nist : FilePath := "nist"
