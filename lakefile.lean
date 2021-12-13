@@ -19,14 +19,16 @@ def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
   fileTargetWithDep oFile srcTarget fun srcFile => do
     IO.println $ "Lean: " ++ (← getLeanIncludeDir).toString
     compileO oFile srcFile 
-      #["-DKATNUM=10",
-        "-I", (pkgDir / cDir / "mceliece348864").toString,
-        "-I", (← getLeanIncludeDir).toString] "c++"
+      #["-O3",
+        "-DKATNUM=10",
+       includeFlag (pkgDir / cDir / "keccak" / "include"),
+       includeFlag (pkgDir / cDir / "mceliece348864"),
+       includeFlag (← getLeanIncludeDir)]
+      "c++"
 
 def mcelieceFiles : Array FilePath := 
   let nist : FilePath := "nist"
-  #[ nist / "kat_kem.c",
-     nist / "rng.c",
+  #[ nist / "rng.c",
      "benes.c", "bm.c", "controlbits.c", "decrypt.c", "encrypt.c", "gf.c",
      "operations.c", "pk_gen.c", "root.c", "sk_gen.c", "synd.c", "transpose.c", "util.c"
     ]
@@ -34,7 +36,8 @@ def mcelieceFiles : Array FilePath :=
 def mcelieceTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
   let src := cDir / "mceliece348864" / srcPath
   ffiOTarget pkgDir src "cc" []
-     #["-DKATNUM=10", 
+     #["-O3",
+       "-DKATNUM=10", 
        "-DCRYPTO_NAMESPACE(x)=x",
        includeFlag (pkgDir / cDir / "mceliece348864"),
 --       includeFlag "/usr/local/Cellar/openssl@1.1/1.1.1l_1/include",
@@ -61,7 +64,7 @@ def keccakTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
   let src := cDir / srcPath
   let commonIncPath := pkgDir / cDir / "keccak" / "Common"
   let incPath := pkgDir / cDir / "keccak" / "include" / "libkeccak.a.headers"
-  ffiOTarget pkgDir src "cc" [] #[includeFlag incPath, includeFlag commonIncPath ]
+  ffiOTarget pkgDir src "cc" [] #["-O3", includeFlag incPath, includeFlag commonIncPath ]
 
 def libkeccakTarget (pkgDir : FilePath) : FileTarget :=
   let libFile := pkgDir / buildDir / cDir / "libkeccak.a"
@@ -456,10 +459,10 @@ def libcryptoTarget (pkgDir : FilePath) : FileTarget :=
   let dependencies := opensslTargets pkgDir
   staticLibTarget libFile dependencies
 
-package ffi (pkgDir) (args) {
+package crypto (pkgDir) (args) {
   -- customize layout
   srcDir := "lib"
-  libRoots := #[`Ffi]
+  libRoots := #[`Crypto]
   -- specify the lib as an additional target
   moreLibTargets := #[libmceliece348864Target pkgDir, libkeccakTarget pkgDir, libcryptoTarget pkgDir]
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]

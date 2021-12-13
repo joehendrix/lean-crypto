@@ -21,7 +21,7 @@ unsigned char entropy_input[48];
 unsigned char seed[KATNUM][48];
 
 int
-mymain()
+main()
 {
     FILE                *fp_req, *fp_rsp;
     int                 ret_val;

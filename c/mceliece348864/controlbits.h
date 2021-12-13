@@ -9,6 +9,6 @@
 
 #include <inttypes.h>
 
-extern void controlbitsfrompermutation(unsigned char *,const int16_t *,long long,long long);
+void controlbitsfrompermutation(unsigned char *,const int16_t *,long long,long long);
 
 #endif
