@@ -1,6 +1,9 @@
-import Crypto.ByteArray
+import Crypto.ByteBuffer
 import Crypto.ByteVec
 import Crypto.UInt8
+
+def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
+| ⟨a,_⟩ => ⟨a⟩ 
 
 theorem add_le_implies_le_rhs {j k : Nat} : ∀(i : Nat), (h : i + j ≤ k) → j ≤ k
 | Nat.succ i, h => add_le_implies_le_rhs i (Nat.le_of_succ_le (Nat.succ_add i j ▸ h))
@@ -13,19 +16,6 @@ theorem add_le_implies_le_rhs {j k : Nat} : ∀(i : Nat), (h : i + j ≤ k) → 
        let q : n-(i+1) < n := Nat.sub_lt (add_le_implies_le_rhs i p) (Nat.zero_lt_succ _)
        f ⟨n-(i+1), q⟩; loop i (Nat.le_of_succ_le p)
   loop n Nat.le.refl
-
-structure ByteBuffer where
-  data : ByteArray
-  deriving DecidableEq
-
-namespace ByteBuffer
-
-protected def toString (a:ByteBuffer) : String := 
-  a.data.foldl (λs b => s ++ b.toHex) ""
-
-instance : ToString ByteBuffer := ⟨ByteBuffer.toString⟩ 
-
-end ByteBuffer
 
 @[extern "open_fd_write"]
 constant openByFd : UInt32 → IO IO.FS.Handle
@@ -45,11 +35,27 @@ def name : String := "mceliece348864"
 def publicKeyBytes : Nat := 261120
 def secretKeyBytes : Nat := 6492
 
+def plaintextBytes : Nat := 32
+def ciphertextBytes : Nat := 128 
+
+def N := 3488
+
+def gfbits : Nat := 12
+def sys_t : Nat := 64
+def pk_nrows : Nat := sys_t * gfbits
+
+def synd_bytes : Nat := ((pk_nrows + 7)/8)
 
 def PublicKey := ByteVec Mceliece348864Ref.publicKeyBytes
   deriving ToString
 
 def SecretKey := ByteVec Mceliece348864Ref.secretKeyBytes
+  deriving ToString
+
+def Plaintext := ByteVec Mceliece348864Ref.plaintextBytes
+  deriving DecidableEq, ToString
+
+def Ciphertext := ByteVec Mceliece348864Ref.ciphertextBytes
   deriving ToString
 
 end Mceliece348864Ref
@@ -61,25 +67,34 @@ structure KeyPair where
 @[extern "lean_try_crypto_kem_keypair"]
 constant tryCryptoKemKeypair (seed: ByteVec 33) : Option KeyPair × ByteVec 33
 
-def mkCryptoKemKeypairloop : ∀(seed: ByteVec 33) (attempts:Nat), IO KeyPair
-| _, 0 =>
-  throw (IO.userError "Key generation failed")
-| seed, Nat.succ n => do
-  match tryCryptoKemKeypair seed with
-  | ⟨some kp, _⟩ => pure kp
-  | ⟨none, seed'⟩ => mkCryptoKemKeypairloop seed' n
-
-def mkCryptoKemKeypair (seed : ByteVec 48) (attempts: optParam Nat 10) : IO KeyPair := do
-  randombytesInit seed
-  let rseed ← randombytes 32
-  mkCryptoKemKeypairloop (#v[64] ++ rseed) attempts
+def mkCryptoKemKeypair (iseed : ByteVec 48) (attempts: optParam Nat 10) : IO KeyPair := do
+  let rec loop : ∀(seed: ByteVec 33) (attempts:Nat), Option KeyPair
+      | _, 0 => none        
+      | seed, Nat.succ n => do
+        match tryCryptoKemKeypair seed with
+        | ⟨some kp, _⟩ => some kp
+        | ⟨none, seed'⟩ => loop seed' n
+  randombytesInit iseed
+  match loop (#v[64] ++ (← randombytes 32)) attempts with
+  | none => throw (IO.userError "Key generation failed")
+  | some p => p
 
 structure EncryptionResult where
-  ss : ByteBuffer
-  ct : ByteBuffer
+  ss : Mceliece348864Ref.Plaintext
+  ct : Mceliece348864Ref.Ciphertext
 
-@[extern "lean_crypto_kem_enc"]
-constant mkCryptoKemEnc : @&Mceliece348864Ref.PublicKey → IO EncryptionResult
+@[extern "lean_crypto_enc"]
+constant mkCryptoEnc : @&Mceliece348864Ref.PublicKey 
+                     → IO (ByteVec Mceliece348864Ref.synd_bytes × ByteVec (Mceliece348864Ref.N / 8))
 
+@[extern "lean_crypto_hash_32b"]
+constant cryptoHash32b : ByteBuffer → ByteVec 32
+
+def mkCryptoKemEnc (pk:Mceliece348864Ref.PublicKey) : IO EncryptionResult := do
+  let (c, e) ← mkCryptoEnc pk
+  let c   := c ++ cryptoHash32b (#b[2] ++ e.toBuffer)
+  let key := cryptoHash32b $ #b[1] ++ e.toBuffer ++ c.toBuffer
+  pure ⟨key, c⟩
+ 
 @[extern "lean_crypto_kem_dec"]
-constant cryptoKemDec (ct : @&ByteBuffer) (sk : @&Mceliece348864Ref.SecretKey) : IO ByteBuffer
+constant cryptoKemDec (ct : @&Mceliece348864Ref.Ciphertext) (sk : @&Mceliece348864Ref.SecretKey) : IO Mceliece348864Ref.Plaintext

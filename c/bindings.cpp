@@ -189,25 +189,27 @@ extern "C" lean_obj_res lean_try_crypto_kem_keypair(lean_obj_arg seed_in_obj) {
     return lean_mk_pair(lean_mk_option_some(lean_mk_keypair(pk_array, sk_array)), seed_out_obj);
 }
 
-extern "C" lean_obj_res lean_crypto_kem_enc(b_lean_obj_arg pk_array) {
+extern "C" lean_obj_res lean_crypto_enc(b_lean_obj_arg pk_array, b_lean_obj_arg _rw) {
     uint8_t* pk = lean_sarray_cptr(pk_array);        
 
-    lean_obj_res ss_array = lean_alloc_sarray1(1, crypto_kem_BYTES);        
-    uint8_t* ss = lean_sarray_cptr(ss_array);        
+    lean_obj_res c_array = lean_alloc_sarray1(1, SYND_BYTES);        
+    uint8_t* c = lean_sarray_cptr(c_array);        
 
-    lean_obj_res ct_array = lean_alloc_sarray1(1, crypto_kem_CIPHERTEXTBYTES);        
-    uint8_t* ct = lean_sarray_cptr(ct_array);        
+    lean_obj_res e_array = lean_alloc_sarray1(1, SYS_N/8);        
+    uint8_t* e = lean_sarray_cptr(e_array);        
 
-    int ret_val;
-    if ( (ret_val = crypto_kem_enc(ct, ss, pk)) != 0) {
-        fprintf(stderr, "crypto_kem_enc returned <%d>\n", ret_val);
-        return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CRYPTO_FAILURE")));
-    }
+	encrypt(c, pk, e);
 
-    lean_object * r = lean_alloc_ctor(1, 2, 0);
-    lean_ctor_set(r, 0, ss_array);
-    lean_ctor_set(r, 1, ct_array);
-    return lean_io_result_mk_ok(r);
+    return lean_io_result_mk_ok(lean_mk_pair(c_array, e_array));
+} 
+
+extern "C" lean_obj_res lean_crypto_hash_32b(b_lean_obj_arg input) {
+    lean_obj_res key_array = lean_alloc_sarray1(1, crypto_kem_BYTES);        
+    uint8_t* key = lean_sarray_cptr(key_array);        
+
+	crypto_hash_32b(key, lean_sarray_cptr(input), lean_sarray_size(input));
+    
+    return key_array;
 }
 
 extern "C" lean_obj_res lean_crypto_kem_dec(b_lean_obj_arg ct_array, b_lean_obj_arg sk_array) {
