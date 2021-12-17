@@ -7,6 +7,32 @@ theorem zero_sub (x:Nat) : 0 - x = 0 := by
   | zero => rfl
   | succ x xh => simp [Nat.sub_succ, xh]
 
+@[simp]
+theorem min_same (n : Nat) : min n n = n := by
+  have h : n ≤ n := Nat.le.refl
+  simp [min, h]
+
+@[simp]
+theorem le_implies_zero_sub {m n:Nat} (p : m ≤ n): m - n = 0 := by
+  revert m p
+  induction n with
+  | zero => 
+    intro m p
+    cases p
+    simp
+  | succ n nh => 
+    intro m p
+    cases m with
+    | zero =>
+      simp
+    | succ m =>
+      simp [Nat.succ_sub_succ]
+      exact nh (le_of_succ_le_succ p)
+ 
+@[simp]
+theorem lt_implies_zero_sub {m n:Nat} (p : m < n): m - n = 0 :=
+  le_implies_zero_sub (Nat.le_of_lt p)
+      
 theorem sub_pos_implies_lt : ∀ {y x z : Nat}, succ z = x - y → y < x := by
   intro y
   induction y with

@@ -1,5 +1,6 @@
 import Crypto.Array
 import Crypto.IsList
+import Crypto.ByteArray.ByteSubarray
 
 namespace ByteArray
 
@@ -28,9 +29,9 @@ theorem size_push : ∀(a:ByteArray) (b:UInt8), (a.push b).size = a.size + 1
 @[simp]
 theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size
 | ⟨a⟩, ⟨b⟩ => by
-  simp [HAppend.hAppend, Append.append]
-  simp [ByteArray.append, ByteArray.copySlice, ByteArray.size]
-  simp [Array.extract, Array.stop_toSubarray, Nat.zero_le, Nat.le_refl, Nat.le_add_right, Nat.sub_self]
+  simp [HAppend.hAppend, Append.append, ByteArray.append]
+  simp [copySlice, size]
+  simp [Nat.le_implies_zero_sub, Nat.le_add_right]
 
 @[inlineIfReduce]
 def fromListAux : List UInt8 → ByteArray → ByteArray
@@ -46,6 +47,12 @@ instance : IsList ByteArray where
   fromList := ByteArray.fromList
 
 @[simp]
+theorem size_empty : size empty = 0 := rfl
+
+@[simp]
+theorem data_empty : empty.data = #[] := rfl
+
+@[simp]
 theorem size_mkEmpty (n:Nat) : size (mkEmpty n) = 0 := rfl
 
 theorem size_fromListAux : ∀(l:List UInt8) (r:ByteArray), (fromListAux l r).size = r.size + l.length
@@ -56,5 +63,10 @@ theorem size_fromListAux : ∀(l:List UInt8) (r:ByteArray), (fromListAux l r).si
 theorem size_from_list : ∀(l:List UInt8), ByteArray.size (fromList l) = l.length
 | [] => rfl
 | a :: as => by simp [fromList, IsList.fromList, ByteArray.fromList, size_fromListAux] 
+
+theorem size_extract : ∀(a:ByteArray) (s e : Nat), (a.extract s e).size = min e a.size - s
+| ⟨a⟩, s, e => by
+  simp [extract, copySlice]
+  admit
 
 end ByteArray

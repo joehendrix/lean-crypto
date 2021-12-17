@@ -93,10 +93,27 @@ theorem stop_toSubarray_large {α:Type} (a:Array α) (start stop : Nat) (p : a.s
 theorem stop_toSubarray {α:Type} (a:Array α) (start stop : Nat) (p : start ≤ stop) (q : stop ≤ a.size)
   : (toSubarray a start stop).stop = stop := by simp [toSubarray, p, q]
 
+theorem size_empty : Array.size (#[] : Array UInt8) = 0 := by rfl
 
-    
-  
-
-
+@[simp]
+theorem size_extract {α:Type} (src: Array α) (start stop : Nat) 
+: (src.extract start stop).size = min stop src.size - start := by
+  simp [extract, toSubarray]
+  cases Decidable.em (stop ≤ size src) with
+  | inl g => 
+    simp [g, min]
+    cases Decidable.em (start ≤ stop) with
+    | inl h => simp [h]
+    | inr h => 
+      have q := Nat.gt_of_not_le h
+      simp [h, Nat.sub_self, Nat.lt_implies_zero_sub q]      
+  | inr g => 
+    simp [g, min]
+    cases Decidable.em (start ≤ size src) with
+    | inl h =>
+      simp [h]
+    | inr h => 
+      have q := Nat.gt_of_not_le h
+      simp [h, Nat.sub_self, Nat.lt_implies_zero_sub q]  
 
 end Array

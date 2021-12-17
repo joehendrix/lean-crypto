@@ -41,21 +41,15 @@ extern "C" LEAN_EXPORT lean_obj_res open_fd_write(uint32_t fd) {
     return lean_io_result_mk_ok(lean::io_wrap_handle(fp));
 }
 
-extern "C" lean_obj_res lean_byte_array_decide_eq(b_lean_obj_arg x, b_lean_obj_arg y) {
-
+extern "C" uint8_t lean_byte_array_decide_eq(b_lean_obj_arg x, b_lean_obj_arg y) {
     size_t n = lean_sarray_size(x);
     if (n != lean_sarray_size(y)) {
-        return lean_alloc_ctor(1, 0, 0);
+        return 0;
     }
-
-    uint8_t* xp = lean_sarray_cptr(x);        
-    uint8_t* yp = lean_sarray_cptr(y); 
-    if (memcmp(lean_sarray_cptr(y), lean_sarray_cptr(y), n)) {
-        return lean_alloc_ctor(1, 0, 0);
-
+    if (memcmp(lean_sarray_cptr(x), lean_sarray_cptr(y), n)) {
+        return 0;
     } 
-
-    return lean_alloc_ctor(2, 0, 0);
+    return 1;
 }
 
 static inline
@@ -212,17 +206,16 @@ extern "C" lean_obj_res lean_crypto_hash_32b(b_lean_obj_arg input) {
     return key_array;
 }
 
-extern "C" lean_obj_res lean_crypto_kem_dec(b_lean_obj_arg ct_array, b_lean_obj_arg sk_array) {
-    uint8_t* ct = lean_sarray_cptr(ct_array);        
+extern "C" lean_obj_res lean_decrypt(b_lean_obj_arg ct_array, b_lean_obj_arg sk_array) {
     uint8_t* sk = lean_sarray_cptr(sk_array);        
+    uint8_t* c = lean_sarray_cptr(ct_array);        
+    lean_obj_res e_array = lean_alloc_sarray1(1, SYS_N/8);        
+    uint8_t* e = lean_sarray_cptr(e_array);        
 
-    lean_obj_res ss1_array = lean_alloc_sarray1(1, crypto_kem_BYTES);        
-    uint8_t* ss1 = lean_sarray_cptr(ss1_array);        
-    int ret_val;
-    if ( (ret_val = crypto_kem_dec(ss1, ct, sk)) != 0) {
-        fprintf(stderr, "crypto_kem_dec returned <%d>\n", ret_val);
-        return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CRYPTO_FAILURE")));
-    }
-
-    return lean_io_result_mk_ok(ss1_array);
+	unsigned char ret_decrypt = decrypt(e, sk, c);
+    
+    lean_object * r = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(r, 0, e_array);
+    lean_ctor_set(r, 1, lean_box(ret_decrypt));
+    return r;
 }

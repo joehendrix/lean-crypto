@@ -1,4 +1,5 @@
 import Crypto.ByteArray
+import Crypto.ToSubarray
 import Crypto.UInt8
 
 structure ByteVec (n:Nat) where
@@ -49,10 +50,79 @@ protected def append {m n : Nat} : ByteVec m → ByteVec n → ByteVec (m+n)
 
 instance (m n : Nat) : HAppend (ByteVec m) (ByteVec n) (ByteVec (m+n)) where
   hAppend := ByteVec.append
-  
+
+def extract {n:Nat} : ByteVec n → ∀(s e:Nat) , ByteVec (min e n - s)
+| ⟨a,p⟩, s, e => ⟨a.extract s e, sorry⟩    
+
+def take {n:Nat} : ∀(b:ByteVec n) (m:Nat), ByteVec (min m n)
+| ⟨a,p⟩, m => ⟨a.extract 0 m, sorry⟩    
+
+def drop {n:Nat} : ByteVec n → ∀(m:Nat), ByteVec (n-m)
+| ⟨a,p⟩, m => ⟨a.extract m a.size, sorry⟩    
+
+protected def forIn {n:Nat} {β : Type v} {m : Type v → Type w} [Monad m] (x : ByteVec n) (b : β) (f : UInt8 → β → m (ForInStep β)) : m β := 
+  x.data.forIn b f
+
+instance : ForIn m (ByteVec n) UInt8 where
+  forIn := ByteVec.forIn
+
+instance : ToStream (ByteVec n) ByteSubarray where
+  toStream a := toStream a.data
+
+
+def orAll {n:Nat} (v:ByteVec n) : UInt8 := Id.run $ do
+  let mut c := 0
+  for b in v do
+    c := c ||| b
+  pure c
+
+protected def map {n:Nat} (f : UInt8 → UInt8) (x : ByteVec n) : ByteVec n := Id.run do
+  let mut r : ByteArray := ByteArray.mkEmpty n
+  for a in x do
+    r := r.push (f a)
+  pure ⟨r, sorry⟩ 
+
+protected def map2 {n:Nat} (f : UInt8 → UInt8 → UInt8) (x y : ByteVec n) : ByteVec n := Id.run do
+  let mut r : ByteArray := ByteArray.mkEmpty n
+  for a in x, b in y.data do
+    r := r.push (f a b)
+  pure ⟨r, sorry⟩ 
+
+protected def and1 {n:Nat} (x:UInt8) (y : ByteVec n) : ByteVec n := ByteVec.map (λa => x &&& a) y
+protected def and {n:Nat} (x y : ByteVec n) : ByteVec n := ByteVec.map2 AndOp.and x y
+protected def or1 {n:Nat} (x:UInt8) (y : ByteVec n) : ByteVec n := ByteVec.map (λa => x ||| a) y
+protected def or  {n:Nat} (x y : ByteVec n) : ByteVec n := ByteVec.map2 OrOp.or x y
+protected def xor {n:Nat} (x y : ByteVec n) : ByteVec n := ByteVec.map2 Xor.xor x y
+
+
+instance : HAnd UInt8 (ByteVec n) (ByteVec n) where
+  hAnd := ByteVec.and1
+
+instance : HAnd (ByteVec n) UInt8 (ByteVec n) where
+  hAnd := λx y => ByteVec.and1 y x
+
+instance : AndOp (ByteVec n) where
+  and := ByteVec.and
+
+instance : HOr UInt8 (ByteVec n) (ByteVec n) where
+  hOr := ByteVec.or1
+
+instance : HOr (ByteVec n) UInt8 (ByteVec n) where
+  hOr := λx y => ByteVec.or1 y x
+
+instance : OrOp (ByteVec n) where
+  or := ByteVec.or
+
+instance : Xor (ByteVec n) where
+  xor := ByteVec.xor
+
 end ByteVec
 
 syntax "#v[" sepBy(term, ", ") "]" : term
 
 macro_rules
   | `(#v[ $elems,* ]) => `(ByteVec.fromList [ $elems,* ])
+
+instance : ToSubarray (ByteVec n) ByteSubarray where
+  size := λ_ => n
+  toSubarray := λv => @ByteArray.toSubarray (v.data)
