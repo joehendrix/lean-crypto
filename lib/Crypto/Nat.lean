@@ -88,4 +88,8 @@ theorem add_implies_sub
       simp [Nat.add_succ] at s
       exact s
 
+theorem add_le_implies_le_rhs {j k : Nat} : ∀(i : Nat), (h : i + j ≤ k) → j ≤ k
+| Nat.succ i, h => add_le_implies_le_rhs i (Nat.le_of_succ_le (Nat.succ_add i j ▸ h))
+| 0, h => Nat.zero_add j ▸ h
+
 end Nat

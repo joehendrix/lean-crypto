@@ -7,7 +7,7 @@ def buildDir := defaultBuildDir
 def ffiOTarget (pkgDir srcPath : FilePath) (compiler: FilePath) (deps : List FileTarget) (opts : Array String) : FileTarget :=
   let oFile := pkgDir / buildDir / srcPath.withExtension "o"
   let src := pkgDir / srcPath
-  fileTargetWithDepList oFile ((inputFileTarget <| src) :: deps) fun _ => do    
+  fileTargetWithDepList oFile ((inputFileTarget <| src) :: deps) fun _ => do
     compileO oFile src opts compiler
 
 def includeFlag (path:FilePath) : String := "-I" ++ path.toString
@@ -18,15 +18,16 @@ def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
   let srcTarget := inputFileTarget <| pkgDir / cDir / "bindings.cpp"
   fileTargetWithDep oFile srcTarget fun srcFile => do
     IO.println $ "Lean: " ++ (← getLeanIncludeDir).toString
-    compileO oFile srcFile 
+    compileO oFile srcFile
       #["-O3",
         "-DKATNUM=10",
+       includeFlag (pkgDir / cDir / "openssl" / "include"),
        includeFlag (pkgDir / cDir / "keccak" / "include"),
        includeFlag (pkgDir / cDir / "mceliece348864"),
        includeFlag (← getLeanIncludeDir)]
       "c++"
 
-def mcelieceFiles : Array FilePath := 
+def mcelieceFiles : Array FilePath :=
   let nist : FilePath := "nist"
   #[ nist / "rng.c",
      "benes.c", "bm.c", "controlbits.c", "decrypt.c", "encrypt.c", "gf.c",
@@ -37,7 +38,7 @@ def mcelieceTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
   let src := cDir / "mceliece348864" / srcPath
   ffiOTarget pkgDir src "cc" []
      #["-O3",
-       "-DKATNUM=10", 
+       "-DKATNUM=10",
        "-DCRYPTO_NAMESPACE(x)=x",
        includeFlag (pkgDir / cDir / "mceliece348864"),
 --       includeFlag "/usr/local/Cellar/openssl@1.1/1.1.1l_1/include",
@@ -50,7 +51,7 @@ def libmceliece348864Target (pkgDir : FilePath) : FileTarget :=
   let dependencies := mcelieceFiles.map (mcelieceTarget pkgDir)
   staticLibTarget libFile (dependencies ++ [bindingsTarget pkgDir])
 
-def keccakFiles : Array FilePath := 
+def keccakFiles : Array FilePath :=
   let base : FilePath := "keccak"
   #[ base / "Modes" / "SimpleFIPS202.c",
      base / "Constructions" / "KeccakSponge.c",
@@ -72,7 +73,7 @@ def libkeccakTarget (pkgDir : FilePath) : FileTarget :=
   staticLibTarget libFile dependencies
 
 --"-arch x86_64",
-      
+
 def opensslDefFlags : Array String :=
     #["-O3",
       "-Wall",
@@ -134,7 +135,7 @@ def opensslTarget (pkgDir : FilePath) (srcPath : FilePath) (extraOps : optParam 
 --      -DENGINESDIR="\"/usr/local/lib/engines-1.1\"" -D_REENTRANT -DNDEBUG  -MMD -MF crypto/cryptlib.d.tmp -MT crypto/cryptlib.o -c -o crypto/cryptlib.o crypto/cryptlib.c
 
 
-def opensslTargets (pkgDir : FilePath) : Array FileTarget := 
+def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
   let base : FilePath := "openssl"
   let modesPath := includeFlag $ pkgDir / cDir / "openssl" / "crypto" / "modes"
   let ocspPath := includeFlag $ pkgDir / cDir / "openssl" / "crypto" / "ocsp"
@@ -453,7 +454,7 @@ def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
 
 
 
-  
+
 def libcryptoTarget (pkgDir : FilePath) : FileTarget :=
   let libFile := pkgDir / buildDir / cDir / "libcrypto.a"
   let dependencies := opensslTargets pkgDir

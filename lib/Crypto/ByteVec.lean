@@ -8,6 +8,8 @@ structure ByteVec (n:Nat) where
 
 namespace ByteVec
 
+protected def get (x:ByteVec n) (i:Fin n) : UInt8 := x.data.get ⟨i.val, by sorry⟩ 
+
 def push {n:Nat} (b:UInt8) : ByteVec n → ByteVec (n+1)
 | ⟨d, p⟩ => ⟨d.push b, by simp [p]⟩  
 

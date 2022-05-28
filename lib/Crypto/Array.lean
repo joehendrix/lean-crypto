@@ -1,6 +1,9 @@
-import Crypto.Nat
+import Crypto.Fin
 
 namespace Array
+
+def generate (n:Nat) (f : Fin n → α) : Array α :=
+  foreachFin n (λi a => a.push (f i)) (mkEmpty n)
 
 @[simp]
 theorem ite_same {α:Type} (p:Prop) [h:Decidable p] (a:α) : (if p then a else a) = a := by
