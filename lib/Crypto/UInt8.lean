@@ -19,6 +19,17 @@ def digitChar (n : UInt8) : Char :=
   if n = 0xf then 'F' else
   '*'
 
+def testBit (w:UInt8) (i:Nat) : Bool :=
+  let mask := 1 <<< i
+  w.toNat &&& mask = mask
+
+def toBitsAux (c : UInt8) : String → Nat → String
+| s, Nat.zero => s
+| s, Nat.succ i =>
+  let w := if c.testBit i then "1" else "0"
+  toBitsAux c (s ++ w) i
+
+def toBits (c : UInt8) (stop : Nat := 8) : String := toBitsAux c "" stop
 
 def toHex (c : UInt8) : String :=
   String.singleton (digitChar (c / 16)) ++ String.singleton (digitChar (c % 16))

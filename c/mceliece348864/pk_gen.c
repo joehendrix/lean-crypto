@@ -17,7 +17,7 @@
 
 /* input: secret key sk */
 /* output: public key pk */
-int pk_gen(unsigned char * pk, unsigned char * sk, uint32_t * perm, int16_t * pi)
+int pk_gen(unsigned char * pk, const unsigned char * sk, const uint32_t * perm, int16_t * pi)
 {
 	int i, j, k;
 	int row, c;
@@ -57,7 +57,7 @@ int pk_gen(unsigned char * pk, unsigned char * sk, uint32_t * perm, int16_t * pi
 	// filling the matrix
 
 	root(inv, g, L);
-		
+
 	for (i = 0; i < SYS_N; i++)
 		inv[i] = gf_inv(inv[i]);
 
@@ -92,7 +92,7 @@ int pk_gen(unsigned char * pk, unsigned char * sk, uint32_t * perm, int16_t * pi
 	for (i = 0; i < (PK_NROWS + 7) / 8; i++)
 	for (j = 0; j < 8; j++)
 	{
-		row = i*8 + j;			
+		row = i*8 + j;
 
 		if (row >= PK_NROWS)
 			break;

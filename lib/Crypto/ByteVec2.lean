@@ -1,11 +1,10 @@
---import Crypto.ByteArray
---import Crypto.UInt8
+import Crypto.ByteArray
+import Crypto.UInt8
 
 structure ByteVec (n:Nat) where
   data : ByteArray
   size_proof : data.size = n
 
-/-
 namespace ByteVec
 
 protected def get (x:ByteVec n) (i:Fin n) : UInt8 := x.data.get ⟨i.val, Eq.subst x.size_proof.symm i.isLt⟩
@@ -21,15 +20,12 @@ def sequence (n:Nat) : ByteVec n := ⟨ByteArray.sequence n, ByteArray.size_sequ
 theorem eq_of_val_eq {n:Nat} : ∀ {x y : ByteVec n}, Eq x.data y.data → Eq x y
   | ⟨x,_⟩, _, rfl => rfl
 
-theorem val_eq_of_eq {n:Nat} {i j : ByteVec n} (h : Eq i j) : Eq i.data j.data :=
-  h ▸ rfl
-
 theorem ne_of_val_ne {n:Nat} {i j : ByteVec n} (h : Not (Eq i.data j.data)) : Not (Eq i j) :=
-  λh' => absurd (val_eq_of_eq h') h
+  λh' => absurd (h' ▸ rfl) h
 
 protected def decideEq {n:Nat} : (a b : ByteVec n) → Decidable (Eq a b) :=
-  fun i j =>
-    match decEq i.data j.data with
+  fun ⟨i, _⟩ ⟨j, _⟩ =>
+    match decEq i j with
     | isTrue h  => isTrue (eq_of_val_eq h)
     | isFalse h => isFalse (ne_of_val_ne h)
 
@@ -50,11 +46,8 @@ protected def append {m n : Nat} : ByteVec m → ByteVec n → ByteVec (m+n)
 instance (m n : Nat) : HAppend (ByteVec m) (ByteVec n) (ByteVec (m+n)) where
   hAppend := ByteVec.append
 
---def extract {n:Nat} : ByteVec n → ∀(s e:Nat) , ByteVec (e - s)
---| ⟨a,p⟩, s, e => ⟨a.extract s e, sorry⟩
-
 def extractN {n:Nat} (a:ByteVec n) (s m:Nat) : ByteVec m :=
-  ⟨a.data.extract s (s+m), sorry⟩
+  ⟨a.data.extractN s m, a.data.size_extractN s m⟩
 
 def drop {n:Nat} (a:ByteVec n) (m:Nat) : ByteVec (n-m) := a.extractN m (n-m)
 
@@ -66,18 +59,14 @@ def orAll {n:Nat} (v:ByteVec n) : UInt8 := Id.run $ do
     c := c ||| b
   pure c
 
-protected def map {n:Nat} (f : UInt8 → UInt8) (x : ByteVec n) : ByteVec n := Id.run do
-  let mut r : ByteArray := ByteArray.mkEmpty n
-  for a in x.data do
-    r := r.push (f a)
-  let s :=
-  pure ⟨r, sorry⟩
+def generate (n:Nat) (f:Fin n → UInt8) : ByteVec n :=
+  ⟨ByteArray.generate n f, ByteArray.size_generate n f⟩
+
+protected def map {n:Nat} (f : UInt8 → UInt8) (x : ByteVec n) : ByteVec n :=
+  generate n (λi => f (x.get i))
 
 protected def map2 {n:Nat} (f : UInt8 → UInt8 → UInt8) (x y : ByteVec n) : ByteVec n := Id.run do
-  let mut r : ByteArray := ByteArray.mkEmpty n
-  for a in x.data, b in y.data do
-    r := r.push (f a b)
-  pure ⟨r, sorry⟩
+  generate n (λi => f (x.get i) (y.get i))
 
 protected def and1 {n:Nat} (x:UInt8) (y : ByteVec n) : ByteVec n := ByteVec.map (λa => x &&& a) y
 --protected def and {n:Nat} (x y : ByteVec n) : ByteVec n := ByteVec.map2 AndOp.and x y
@@ -113,9 +102,16 @@ def ofUInt64lsb (v:UInt64) : ByteVec 8 :=
 
 end ByteVec
 
+
+--structure UInt16Vec (n:Nat) where
+--  data : Array
+--  size_proof : data.size = n
+
+--namespace ByteVec
+
 syntax "#v[" sepBy(term, ", ") "]" : term
 
 macro_rules
   | `(#v[ $elems,* ]) => `(ByteVec.fromList [ $elems,* ])
 
--/
+

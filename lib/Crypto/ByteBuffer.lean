@@ -1,5 +1,5 @@
 import Crypto.ByteArray
-import Crypto.UInt8
+--import Crypto.UInt8
 
 structure ByteBuffer where
   data : ByteArray
@@ -7,14 +7,16 @@ structure ByteBuffer where
 
 namespace ByteBuffer
 
-protected def toString (a:ByteBuffer) : String := 
+/-
+protected def toString (a:ByteBuffer) : String :=
   a.data.foldl (λs b => s ++ b.toHex) ""
 
-instance : ToString ByteBuffer := ⟨ByteBuffer.toString⟩ 
+instance : ToString ByteBuffer := ⟨ByteBuffer.toString⟩
+-/
 
 protected def fromList (l:List UInt8) : ByteBuffer := ⟨fromList l⟩
 
-protected def append : ByteBuffer → ByteBuffer → ByteBuffer 
+protected def append : ByteBuffer → ByteBuffer → ByteBuffer
 | ⟨x⟩, ⟨y⟩ => ⟨x ++ y⟩
 
 instance  : Append ByteBuffer where

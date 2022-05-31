@@ -1,14 +1,37 @@
-structure Vec (n:Nat) (α:Type u) where
-  data : Array α
-  size_proof : data.size = n
+import Crypto.BitVec
 
-namespace Vec
+inductive Kind
+| bit : Kind
+| vec : Nat → Kind → Kind
 
-def groupBy {n:Nat} : Vec n α → ∀(parts each:Nat), Vec parts (Vec each α) := sorry
+export Kind(bit)
+export Kind(vec)
 
-protected def map {n:Nat} {α β : Type u} (f : α → β) (a: Vec n α) : Vec n β := sorry
 
-instance : Functor (Vec n) where
-  map := Vec.map
 
-end Vec
+namespace Kind
+
+def width : Kind → Nat
+| bit => 1
+| vec n k => n * k.width
+
+def Value (k:Kind) : Type := BitVec k.width
+
+instance : CoeSort Kind Type where
+   coe := Kind.Value
+
+protected
+def toString : ∀{k:Kind}, Value k → String
+| bit, v => if v.get! 0 then "1" else "0"
+| vec n k, v => v.toString
+
+instance (k:Kind) : ToString (Value k) := ⟨Kind.toString⟩
+
+--protected
+--def get! {n:Nat} {k:Kind} (a:vec n k) (i:Nat) : k := a.slice (i * k.width) k.width
+
+end Kind
+
+-- Creates a vector [0..n)
+def byteSequence (n:Nat) : Kind.vec n (Kind.vec 8 bit) :=
+  ⟨ByteArray.sequence n, by admit⟩

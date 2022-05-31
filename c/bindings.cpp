@@ -5,9 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 extern "C" {
-#include "nist/rng.h"
-}
-extern "C" {
 #include "crypto_kem.h"
 #include "operations.h"
 
@@ -101,7 +98,36 @@ inline static lean_obj_res lean_mk_pair(lean_obj_arg x, lean_obj_arg y) {
     return r;
 }
 
-extern "C" lean_obj_res lean_randombytes_init(b_lean_obj_arg entropy_input_array) {
+static void
+my_AES256_CTR_DRBG_Update(unsigned char *provided_data,
+                       unsigned char *Key,
+                       unsigned char *V)
+{
+    unsigned char   temp[48];
+    int i;
+    int j;
+
+    for (i=0; i<3; i++) {
+        /* increment V */
+        for (j=15; j>=0; j--) {
+            if ( V[j] == 0xff )
+                V[j] = 0x00;
+            else {
+                V[j]++;
+                break;
+            }
+        }
+
+        AES256_ECB(Key, V, temp+16*i);
+    }
+    if ( provided_data != NULL )
+        for (i=0; i<48; i++)
+            temp[i] ^= provided_data[i];
+    memcpy(Key, temp, 32);
+    memcpy(V, temp+32, 16);
+}
+
+extern "C" lean_obj_res lean_random_init(b_lean_obj_arg entropy_input_array) {
     assert(lean_sarray_size(entropy_input_array) == 48);
     unsigned char* entropy_input = lean_sarray_cptr(entropy_input_array);
 
@@ -115,11 +141,11 @@ extern "C" lean_obj_res lean_randombytes_init(b_lean_obj_arg entropy_input_array
     memcpy(seed_material, entropy_input, 48);
     memset(key, 0x00, 32);
     memset(v, 0x00, 16);
-    AES256_CTR_DRBG_Update(seed_material, key, v);
+    my_AES256_CTR_DRBG_Update(seed_material, key, v);
     return lean_mk_pair(key_array, v_array);
 }
 
-extern "C" lean_obj_res lean_randombytes(b_lean_obj_arg drbg_obj, b_lean_obj_arg size) {
+extern "C" lean_obj_res lean_random_bytes(b_lean_obj_arg drbg_obj, b_lean_obj_arg size) {
     if (LEAN_UNLIKELY(!lean_is_scalar(size))) {
         lean_internal_panic_out_of_memory();
     }
@@ -163,7 +189,59 @@ extern "C" lean_obj_res lean_randombytes(b_lean_obj_arg drbg_obj, b_lean_obj_arg
             xlen = 0;
         }
     }
-    AES256_CTR_DRBG_Update(NULL, key, v);
+    my_AES256_CTR_DRBG_Update(NULL, key, v);
+
+    return lean_mk_pair(r, lean_mk_pair(key_array, v_array));
+}
+
+extern "C" lean_obj_res lean_random_bits(b_lean_obj_arg drbg_obj, b_lean_obj_arg size) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(size))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t size_val = lean_unbox(size);
+    // Currently we require bits are a multiple of 8.
+    assert (size_val % 8 == 0);
+    size_t xlen = size_val / 8;
+
+    uint8_t* key_input = lean_sarray_cptr(lean_ctor_get(drbg_obj, 0));
+    lean_obj_res key_array = lean_alloc_sarray1(1, 32);
+    uint8_t* key = lean_sarray_cptr(key_array);
+    memcpy(key, key_input, 32);
+
+    uint8_t* v_input   = lean_sarray_cptr(lean_ctor_get(drbg_obj, 1));
+    lean_obj_res v_array = lean_alloc_sarray1(1, 16);
+    uint8_t* v = lean_sarray_cptr(v_array);
+    memcpy(v, v_input, 16);
+
+    lean_obj_res r = lean_alloc_sarray1(1, xlen);
+    uint8_t* x = lean_sarray_cptr(r);
+
+    unsigned char   block[16];
+    int             i = 0;
+    int j;
+
+    while ( xlen > 0 ) {
+        /* increment V */
+        for (j=15; j>=0; j--) {
+            if ( v[j] == 0xff )
+                v[j] = 0x00;
+            else {
+                v[j]++;
+                break;
+            }
+        }
+        AES256_ECB(key, v, block);
+        if ( xlen > 15 ) {
+            memcpy(x+i, block, 16);
+            i += 16;
+            xlen -= 16;
+        }
+        else {
+            memcpy(x+i, block, xlen);
+            xlen = 0;
+        }
+    }
+    my_AES256_CTR_DRBG_Update(NULL, key, v);
 
     return lean_mk_pair(r, lean_mk_pair(key_array, v_array));
 }
@@ -182,86 +260,94 @@ inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
     return r;
 }
 
-extern "C" lean_obj_res lean_try_crypto_kem_keypair(lean_obj_arg seed_in_obj) {
 
-    int i;
-    unsigned char r[ SYS_N/8 + (1 << GFBITS)*sizeof(uint32_t) + SYS_T*2 + 32 ];
-    unsigned char *rp;
-
-    lean_obj_res pk_array = lean_alloc_sarray1(1, crypto_kem_PUBLICKEYBYTES);
-    uint8_t* pk = lean_sarray_cptr(pk_array);
-
-    lean_obj_res sk_array = lean_alloc_sarray1(1, crypto_kem_SECRETKEYBYTES);
-    uint8_t* sk = lean_sarray_cptr(sk_array);
-
-    gf f[ SYS_T ]; // element in GF(2^mt)
-    gf irr[ SYS_T ]; // Goppa polynomial
-    uint32_t perm[ 1 << GFBITS ]; // random permutation as 32-bit integers
-    int16_t pi[ 1 << GFBITS ]; // random permutation
-    rp = &r[ sizeof(r)-32 ];
-    unsigned char *skp = sk;
-
-    unsigned char* seed_in = lean_sarray_cptr(seed_in_obj);
-
-    // expanding and updating the seed
-    shake(r, sizeof(r), seed_in, 33);
-    memcpy(skp, seed_in+1, 32);
-    skp += 32 + 8;
-
-    // Update the seed
-    lean_obj_res seed_out_obj;
-    unsigned char* seed_out;
-    if (lean_is_exclusive(seed_in_obj)) {
-        seed_out_obj = seed_in_obj;
-        seed_out = seed_in;
-    } else {
-        seed_out_obj = lean_alloc_sarray1(1, 33);
-        seed_out = lean_sarray_cptr(seed_out_obj);
-        seed_out[0] = seed_in[0];
-        lean_dec_ref(seed_in_obj);
+extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in_obj) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(size_obj))) {
+        lean_internal_panic_out_of_memory();
     }
-    memcpy(seed_out+1, &r[ sizeof(r)-32 ], 32);
+    size_t size = lean_unbox(size_obj);
+    lean_obj_res r_obj = lean_alloc_sarray1(1, size);
 
+    shake(lean_sarray_cptr(r_obj), size, lean_sarray_cptr(in_obj), lean_sarray_size(in_obj));
 
-    // generating irreducible polynomial
+    return r_obj;
+}
 
-    rp -= sizeof(f);
+extern "C" lean_obj_res lean_load_gf_array(b_lean_obj_arg r_obj) {
+    lean_obj_res f_obj = lean_alloc_sarray1(2, SYS_T);
+    gf* f = reinterpret_cast<gf*>(lean_sarray_cptr(f_obj));
 
-    for (i = 0; i < SYS_T; i++)
+    unsigned char* rp = lean_sarray_cptr(r_obj);
+    for (size_t i = 0; i < SYS_T; i++)
         f[i] = load_gf(rp + i*2);
+    return f_obj;
+}
+
+extern "C" lean_obj_res lean_genpoly_gen(b_lean_obj_arg f_obj) {
+    gf* f = reinterpret_cast<gf*>(lean_sarray_cptr(f_obj));
+
+
+    lean_obj_res irr_obj = lean_alloc_sarray1(2, SYS_T);
+    gf* irr = reinterpret_cast<gf*>(lean_sarray_cptr(irr_obj));
 
     if (genpoly_gen(irr, f)) {
-        return lean_mk_pair(lean_mk_option_none(), seed_out_obj);
+        return lean_mk_option_none();
+    } else {
+        return lean_mk_option_some(irr_obj);
     }
+}
 
-    for (i = 0; i < SYS_T; i++)
-        store_gf(skp + i*2, irr[i]);
+extern "C" lean_obj_res lean_load4_array(b_lean_obj_arg r_obj) {
+    lean_obj_res perm_obj = lean_alloc_sarray1(4, 1 << GFBITS);
+    uint32_t* perm = reinterpret_cast<uint32_t*>(lean_sarray_cptr(perm_obj));
 
-    skp += IRR_BYTES;
-
-    // generating permutation
-
-    rp -= sizeof(perm);
-
-    for (i = 0; i < (1 << GFBITS); i++)
+    unsigned char* rp = lean_sarray_cptr(r_obj);
+    for (size_t i = 0; i < (1 << GFBITS); i++)
         perm[i] = load4(rp + i*4);
+    return perm_obj;
+}
 
-    if (pk_gen(pk, skp - IRR_BYTES, perm, pi)) {
-        return lean_mk_pair(lean_mk_option_none(), seed_out_obj);
+extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
+    gf* irr = reinterpret_cast<gf*>(lean_sarray_cptr(irr_obj));
+
+    lean_obj_res sk_obj = lean_alloc_sarray1(1, 2 * SYS_T);
+    uint8_t* sk = lean_sarray_cptr(sk_obj);
+
+    // generating irreducible polynomial
+    for (size_t i = 0; i < SYS_T; i++)
+        store_gf(sk + i*2, irr[i]);
+
+    return sk_obj;
+}
+
+extern "C" lean_obj_res lean_pk_gen(b_lean_obj_arg sk_obj, b_lean_obj_arg perm_obj) {
+    uint8_t* sk = lean_sarray_cptr(sk_obj);
+    assert(lean_sarray_size(sk_obj) == 2 * SYS_T);
+
+    uint32_t* perm = reinterpret_cast<uint32_t*>(lean_sarray_cptr(perm_obj));
+
+    lean_obj_res pk_obj = lean_alloc_sarray1(1, crypto_kem_PUBLICKEYBYTES);
+    uint8_t* pk = lean_sarray_cptr(pk_obj);
+
+    lean_obj_res pi_obj = lean_alloc_sarray1(1, 2 * (1 << GFBITS));
+    int16_t* pi = reinterpret_cast<int16_t*>(lean_sarray_cptr(pi_obj));
+
+    if (pk_gen(pk, sk, perm, pi)) {
+        return lean_mk_option_none();
     }
 
-    controlbitsfrompermutation(skp, pi, GFBITS, 1 << GFBITS);
-    skp += COND_BYTES;
+    return lean_mk_option_some(lean_mk_pair(pk_obj, pi_obj));
+}
 
-    // storing the random string s
+extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
+    lean_obj_res sk_obj = lean_alloc_sarray1(1, COND_BYTES);
+    uint8_t* sk = lean_sarray_cptr(sk_obj);
 
-    rp -= SYS_N/8;
-    memcpy(skp, rp, SYS_N/8);
+    const int16_t* pi = reinterpret_cast<int16_t*>(lean_sarray_cptr(pi_obj));
 
-    // storing positions of the 32 pivots
-    store8(sk + 32, 0xFFFFFFFF);
+    controlbitsfrompermutation(sk, pi, GFBITS, 1 << GFBITS);
 
-    return lean_mk_pair(lean_mk_option_some(lean_mk_keypair(pk_array, sk_array)), seed_out_obj);
+    return sk_obj;
 }
 
 static inline unsigned char same_mask(uint16_t x, uint16_t y)

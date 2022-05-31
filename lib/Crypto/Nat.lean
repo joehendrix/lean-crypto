@@ -1,11 +1,11 @@
 
 namespace Nat
 
-@[simp]
-theorem zero_sub (x:Nat) : 0 - x = 0 := by
-  induction x with
-  | zero => rfl
-  | succ x xh => simp [Nat.sub_succ, xh]
+--@[simp]
+--theorem zero_sub (x:Nat) : 0 - x = 0 := by
+--  induction x with
+--  | zero => rfl
+--  | succ x xh => simp [Nat.sub_succ, xh]
 
 @[simp]
 theorem min_same (n : Nat) : min n n = n := by
@@ -16,11 +16,11 @@ theorem min_same (n : Nat) : min n n = n := by
 theorem le_implies_zero_sub {m n:Nat} (p : m ≤ n): m - n = 0 := by
   revert m p
   induction n with
-  | zero => 
+  | zero =>
     intro m p
     cases p
     simp
-  | succ n nh => 
+  | succ n nh =>
     intro m p
     cases m with
     | zero =>
@@ -28,22 +28,22 @@ theorem le_implies_zero_sub {m n:Nat} (p : m ≤ n): m - n = 0 := by
     | succ m =>
       simp [Nat.succ_sub_succ]
       exact nh (le_of_succ_le_succ p)
- 
+
 @[simp]
 theorem lt_implies_zero_sub {m n:Nat} (p : m < n): m - n = 0 :=
   le_implies_zero_sub (Nat.le_of_lt p)
-      
+
 theorem sub_pos_implies_lt : ∀ {y x z : Nat}, succ z = x - y → y < x := by
   intro y
   induction y with
   | zero =>
     intros x z inv
     simp at inv
-    simp [Eq.symm inv, zero_lt_succ]       
+    simp [Eq.symm inv, zero_lt_succ]
   | succ y yh =>
     intros x z inv
     cases x with
-    | zero =>       
+    | zero =>
       simp at inv
     | succ x =>
       simp [Nat.succ_sub_succ] at inv
@@ -55,8 +55,8 @@ theorem sub_implies_add
   revert x
   induction z with
   | zero =>
-    simp 
-    intros x p s
+    simp
+    intros x s
     exact s
   | succ z iz =>
     intros x p s
@@ -91,5 +91,21 @@ theorem add_implies_sub
 theorem add_le_implies_le_rhs {j k : Nat} : ∀(i : Nat), (h : i + j ≤ k) → j ≤ k
 | Nat.succ i, h => add_le_implies_le_rhs i (Nat.le_of_succ_le (Nat.succ_add i j ▸ h))
 | 0, h => Nat.zero_add j ▸ h
+
+theorem le_sub_of_le_add {x y z : Nat} (p:x ≤ z + y) : x - y ≤ z := by
+  revert x z
+  induction y with
+  | zero =>
+    intro x z
+    simp [Nat.add_zero]
+    exact id
+  | succ y ind =>
+    intro x z p
+    cases x with
+    | zero =>
+      simp [Nat.zero_sub]
+    | succ x =>
+      simp [Nat.succ_sub_succ]
+      exact ind (Nat.le_of_succ_le_succ p)
 
 end Nat

@@ -3,14 +3,14 @@ import Crypto
 def main (args:List String): IO Unit := do
   match args with
   | [reqPath, rspPath] => do
-      let mut drbg0 := randombytesInit (ByteVec.sequence 48);
-      let mut seedArray : Array (ByteVec 48) := #[]
+      let mut drbg0 := randombytesInit (byteSequence 48);
+      let mut seedArray : Array Seed := #[]
       let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write false
       for i in [0:10] do
-        let (seed, drbg2) := randombytes drbg0 48
+        let (seed, drbg2) := mkRandom drbg0 (vec 48 (vec 8 bit))
         drbg0 := drbg2
         fpReq.putStrLn s!"count = {i}"
-        fpReq.putStrLn s!"seed = {seed}"
+        fpReq.putStrLn s!"seed = {seed.toHex}"
         fpReq.putStrLn "pk ="
         fpReq.putStrLn "sk ="
         fpReq.putStrLn "ct ="
@@ -31,7 +31,7 @@ def main (args:List String): IO Unit := do
         if enc.ss ≠ expected then
           throw $ IO.userError "crypto_kem_dec returned bad 'ss' value"
         fpRsp.putStrLn $ s!"count = {i}"
-        fpRsp.putStrLn $ s!"seed = {seed}"
+        fpRsp.putStrLn $ s!"seed = {seed.toHex}"
         fpRsp.putStrLn $ s!"pk = {key.pk}"
         fpRsp.putStrLn $ s!"sk = {key.sk}"
         fpRsp.putStrLn $ s!"ct = {enc.ct}"
