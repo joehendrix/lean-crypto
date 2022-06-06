@@ -9,13 +9,15 @@ structure ByteSubarray where
 
 namespace ByteSubarray
 
-
 protected constant forIn {β : Type v} {m : Type v → Type w} [Monad m] (s : ByteSubarray) (b : β) (f : UInt8 → β → m (ForInStep β)) : m β :=
   let rec loop (n i : Nat) (p : i + n = s.stop) (b : β) : m β := do
     match n, p with
     | 0,   _ => pure b
     | n+1, p =>
-      let q : i < s.as.size := sorry  -- linear arithmetic should solve.
+      let q1 : i < s.stop := by
+        admit
+      let q : i < s.as.size := Nat.lt_of_lt_of_le q1 s.h₂
+        -- linear arithmetic should solve.
       match (← f (s.as.get ⟨i, q⟩) b) with
       | ForInStep.done b  => pure b
       | ForInStep.yield b => loop n (i+1) sorry b

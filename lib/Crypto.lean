@@ -3,6 +3,7 @@ import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.UInt8
 import Crypto.Vec
+import Crypto.Vector
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
@@ -30,7 +31,9 @@ constant randombytes (rbg:DRBG) (n:@&Nat) : ByteVec n × DRBG
 @[extern "lean_random_bits"]
 constant randombits (rbg:DRBG) (n:@&Nat) : BitVec n × DRBG
 
-def mkRandom (drbg:DRBG) (K:Kind) : K × DRBG := randombits drbg K.width
+def mkRandom (drbg:DRBG) (K:Kind) : K × DRBG :=
+  let ⟨b,d⟩ := randombits drbg K.width
+  ⟨⟨b⟩,d⟩
 
 def initKeypairSeedPrefix : ByteVec 1 := #v[64]
 
@@ -87,14 +90,32 @@ constant shake (w:Nat) (input: ByteArray) : ByteVec w
 @[reducible]
 def rw : Nat :=  N/8 + 4*(1 <<< gfbits) + sys_t * 2 + 32
 
-@[extern "lean_load_gf_array"]
-constant loadGfArray (r: ByteVec (2*sys_t)) : ByteVec (2*sys_t) -- FIXME: Make Uint16vec with sys_t elements
+--@[extern "lean_load_gf_array"]
+--constant loadGfArray (r: ByteVec (2*sys_t)) : vec sys_t (vec 16 bit) -- FIXME: Make Uint16vec with sys_t elements
+
+def gfMask : UInt16 := (1 <<< 12) - 1
+
+@[reducible]
+def gf := vec 16 bit
+
+def loadGf {n} (r: ByteVec n) (i:Nat) : gf :=
+  let w : vec 16 bit := Kind.ofUInt8 (r.get! i) ++ Kind.ofUInt8 (r.get! (i+1))
+  w &&& Kind.ofUInt16_lbf gfMask
+
+def loadGfArray {n:Nat} (r: ByteVec (2*n)) : vec n gf :=
+  Kind.generateV n (λi => loadGf r (2*i.val))
+
+def byteToUInt32 (v:UInt8) : UInt32 := UInt32.ofNat (v.toNat)
+
+def load4 {n} (r: ByteVec n) (i:Nat) : UInt32 :=
+  let b (j:Nat) (s:UInt32) : UInt32 := byteToUInt32 (r.get! (i+j)) <<< s
+  b 0 0 ||| b 1 8 ||| b 2 16 ||| b 3 24
+
+def load4Array {n:Nat} (r: ByteVec (4*n)) : Vector n UInt32 :=
+  Vector.generate n (λi => load4 r (4*i.val))
 
 @[extern "lean_genpoly_gen"]
-constant genPolyGen (f : ByteVec (2*sys_t)) : Option (ByteVec (2*sys_t))
-
-@[extern "lean_load4_array"]
-constant load4Array (r: ByteVec (4*(1 <<< gfbits))) : ByteVec (4*(1 <<< gfbits)) -- FIXME: Make Uint32vec with (1 <<< gfbits) elements
+constant genPolyGen (f : vec sys_t gf) : Option (ByteVec (2*sys_t))
 
 def irr_bytes : Nat := sys_t * 2
 
@@ -104,18 +125,16 @@ def cond_bytes : Nat := (1 <<< (gfbits-4))*(2*gfbits - 1)
 constant store_gf (irr : ByteVec (2*sys_t)) : ByteVec (2*sys_t)
 
 @[extern "lean_pk_gen"]
-constant pk_gen (sk : ByteVec (2*sys_t)) (perm : ByteVec (4*(1 <<< gfbits)))
+constant pk_gen (sk : ByteVec (2*sys_t)) (perm : Vector (1 <<< gfbits) UInt32)
   : Option (PublicKey × ByteVec (2*(1 <<< gfbits)))
 
 @[extern "lean_controlbitsfrompermutation"]
 constant controlBitsFromPermutation (pi : ByteVec (2*(1 <<< gfbits))) : ByteVec cond_bytes
 
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
-  let sk_input   := r.extractN 0 (N/8)
-  let perm_input := r.extractN (N/8) (4*(1 <<< gfbits))
-  let irr_input  := r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
-  let f := loadGfArray irr_input
-  let perm := load4Array perm_input
+  let sk_input :=           r.extractN 0 (N/8)
+  let perm := load4Array  $ r.extractN (N/8) (4*(1 <<< gfbits))
+  let f    := loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
   match genPolyGen f with
   | none => none
   | some irr =>
@@ -150,7 +169,7 @@ def load_gf (src : ByteVec 2) : UInt16 :=
   ((src.get ⟨0, Nat.le.step Nat.le.refl⟩).toUInt16 <<< 8 ||| (src.get ⟨1, Nat.le.refl⟩).toUInt16) &&& gfmask
 
 @[extern "lean_crypto_gen_e_step1"]
-constant gen_e_step1 : @&(ByteVec (4 * sys_t)) → Option (vec sys_t (vec 16 bit))
+constant gen_e_step1 : @&(vec (2*sys_t) (vec 16 bit)) → Option (vec sys_t (vec 16 bit))
 
 @[extern "lean_crypto_gen_e_step2"]
 constant gen_e_step2 : @&(vec sys_t (vec 16 bit)) → ByteVec sys_t
@@ -158,21 +177,22 @@ constant gen_e_step2 : @&(vec sys_t (vec 16 bit)) → ByteVec sys_t
 @[extern "lean_crypto_gen_e_step3"]
 constant gen_e_step3 : @&(vec sys_t (vec 16 bit)) → @&(ByteVec sys_t) → ByteVec (N / 8)
 
-
+/-
 def hasDuplicate (v:vec sys_t (vec 16 bit)) : Bool := Id.run do
   for i in [0:sys_t] do
     for j in [0:i] do
       if v.get! i = v.get! j then
         return true
   return false
-
+-/
 
 def cGenE2 : ∀(drbg:DRBG) (attempts:Nat), Option (ByteVec (N / 8) × DRBG)
   | _, 0 =>
     none
   | drbg, Nat.succ attempts =>
-    let (bytes, drbg) := randombytes drbg (4*sys_t)
-    match gen_e_step1 bytes with
+    let (bytes, drbg) := randombytes drbg _
+    let a := loadGfArray bytes
+    match gen_e_step1 a with
     | none =>
       cGenE2 drbg attempts
     | some ind =>

@@ -1,12 +1,6 @@
 
 namespace Nat
 
---@[simp]
---theorem zero_sub (x:Nat) : 0 - x = 0 := by
---  induction x with
---  | zero => rfl
---  | succ x xh => simp [Nat.sub_succ, xh]
-
 @[simp]
 theorem min_same (n : Nat) : min n n = n := by
   have h : n ≤ n := Nat.le.refl
@@ -107,5 +101,12 @@ theorem le_sub_of_le_add {x y z : Nat} (p:x ≤ z + y) : x - y ≤ z := by
     | succ x =>
       simp [Nat.succ_sub_succ]
       exact ind (Nat.le_of_succ_le_succ p)
+
+def eq_add_implies_lt {x y z : Nat} (p : x + y.succ = z) : x < z := by
+  apply Nat.add_le_implies_le_rhs y
+  apply Nat.le_of_eq
+  rw [Nat.add_comm]
+  simp only [Nat.succ_add]
+  exact p
 
 end Nat

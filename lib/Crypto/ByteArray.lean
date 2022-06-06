@@ -1,6 +1,8 @@
 import Crypto.Array
-import Crypto.IsList
 import Crypto.ByteArray.ByteSubarray
+import Crypto.IsList
+import Crypto.List
+import Crypto.Nat
 
 namespace ByteArray
 
@@ -23,63 +25,68 @@ def decideEq : (a b : ByteArray) → Decidable (Eq a b) :=
 instance : DecidableEq ByteArray := decideEq
 
 theorem size_push : ∀(a:ByteArray) (b:UInt8), (a.push b).size = a.size + 1
-| ⟨a⟩, b => by simp [ByteArray.size, ByteArray.push]
+| ⟨a⟩, b => by simp only [ByteArray.size, ByteArray.push, Array.size_push]
 
-theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size
+theorem append_data : ∀(x y:ByteArray), (x ++ y).data = x.data ++ y.data
 | ⟨a⟩, ⟨b⟩ => by
-  simp [HAppend.hAppend, Append.append, ByteArray.append]
-  simp [copySlice, size]
-  simp [Nat.le_implies_zero_sub, Nat.le_add_right]
+  simp [HAppend.hAppend, Append.append]
+  simp [ByteArray.append, copySlice]
+  have p : a.size + b.size ≥ a.size := Nat.le_add_right a.size b.size
+  simp [size, Array.extract_all, Array.extract_end_empty p, Array.append_empty (a++b) ]
+  trivial
 
-@[inlineIfReduce]
-def fromListAux : List UInt8 → ByteArray → ByteArray
-  | [],       r => r
-  | a :: as, r => fromListAux as (r.push a)
+theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size := by
+  intro x y
+  simp only [size]
+  have q := append_data x y
+  simp only [HAppend.hAppend, Append.append] at q
+  simp only [q]
+  apply Array.size_append
 
 @[inline, matchPattern]
-protected def fromList (as : List UInt8) : ByteArray :=
-  fromListAux as (ByteArray.mkEmpty as.redLength)
+protected def fromList (l : List UInt8) : ByteArray := { data := { data := l } }
 
 instance : IsList ByteArray where
   element := UInt8
   fromList := ByteArray.fromList
 
-/-
-@[simp]
-theorem size_empty : size empty = 0 := rfl
-
-@[simp]
-theorem data_empty : empty.data = #[] := rfl
--/
-
 theorem size_mkEmpty (n:Nat) : size (mkEmpty n) = 0 := rfl
 
-theorem size_fromListAux : ∀(l:List UInt8) (r:ByteArray), (fromListAux l r).size = r.size + l.length
-| [] , r => rfl
-| a :: as, r => by simp [fromListAux, size_fromListAux as _, Nat.add_succ, Nat.succ_add, size_push]
-
-theorem size_from_list : ∀(l:List UInt8), ByteArray.size (fromList l) = l.length
-| [] => rfl
-| a :: as => by simp [fromList, IsList.fromList, ByteArray.fromList, size_fromListAux, size_mkEmpty]
+theorem size_from_list : ∀(l:List UInt8), ByteArray.size (fromList l) = l.length := by
+  simp [fromList, ByteArray.fromList, size]
 
 def replicateAux : ByteArray → Nat → UInt8 → ByteArray
 | a, 0, _ => a
 | a, Nat.succ n, c => replicateAux (a.push c) n c
 
-def replicate (n:Nat) (c:UInt8) : ByteArray := replicateAux (ByteArray.mkEmpty n) n c
+def replicateNoList (n:Nat) (c:UInt8) : ByteArray := replicateAux (ByteArray.mkEmpty n) n c
 
-theorem size_replicateAux (a:ByteArray) (n:Nat) (c:UInt8) : (replicateAux a n c).size = a.size + n := by
+@[implementedBy replicateNoList]
+def replicate (n:Nat) (c:UInt8) : ByteArray := fromList (List.replicate n c)
+
+theorem replicateAuxAsList (a:ByteArray) (j: Nat) (c:UInt8)
+    : replicateAux a j c = a ++ fromList (List.replicate j c) := by
   revert a
-  induction n with
+  induction j with
   | zero =>
     intro a
-    simp [replicateAux]
+    apply ByteArray.eq_of_val_eq
+    simp [replicateAux, append_data, Array.append_data, fromList, ByteArray.fromList]
   | succ n nh =>
     intro a
-    simp [replicateAux, nh, ByteArray.size_push, Nat.add_succ, Nat.succ_add]
+    apply ByteArray.eq_of_val_eq
+    simp [replicateAux, nh, append_data, Array.append_data, fromList, ByteArray.fromList]
+    simp [push, Array.push, List.concat_to_cons]
+
+theorem replicateNoListCorrect (n: Nat) (c:UInt8)
+    : replicateNoList n c = replicate n c := by
+  simp [replicateNoList, replicateAuxAsList, replicate]
+  apply ByteArray.eq_of_val_eq
+  simp only [append_data, Array.append_data]
+  trivial
 
 theorem size_replicate (n:Nat) (c:UInt8) : (replicate n c).size = n := by
-  simp [replicate, size_replicateAux, size_mkEmpty]
+  simp [replicate, size, fromList, ByteArray.fromList]
 
 def sequenceAux : ByteArray → Nat → ByteArray
 | a, 0 => a
@@ -103,12 +110,24 @@ theorem size_sequence (n:Nat) : (sequence n).size = n := by
 
 theorem size_extract : ∀(a:ByteArray) (s e : Nat), (a.extract s e).size = min e a.size - s
 | ⟨a⟩, s, e => by
-  simp [extract, copySlice, size, empty, mkEmpty, Array.size_empty, min]
-  cases Decidable.em (e ≤ Array.size a) with
+  -- Reduce byte array theorem to array theorem
+  simp only [extract, copySlice, size, empty, mkEmpty]
+  -- Reduce array problem to arithmetic
+  simp only [Array.size_append, Array.size_extract, Array.size_empty]
+  -- Cleanup ite
+  simp only [min, ite_same]
+  -- Cleanup arithmetic
+  simp only [Nat.zero_sub, Nat.zero_add, Nat.add_zero]
+  cases Decidable.em (e ≤ a.size) with
   | inl h1 =>
+    simp [h1]
     cases Decidable.em (s ≤ e) with
     | inl h2 =>
-      simp [h1, Nat.add_sub_of_le h2]
+      have h3 : s + (e - s) ≤ a.size := by
+              simp only [Nat.add_sub_of_le h2]
+              exact h1
+      simp [h3]
+      simp only [Nat.add_sub_cancel_left]
     | inr h2 =>
       have s3 := Nat.le_of_lt (Nat.gt_of_not_le h2)
       simp [h1, Nat.le_implies_zero_sub, s3]
@@ -151,18 +170,12 @@ theorem size_extractN (a:ByteArray) (s n : Nat) : (a.extractN s n).size = n := b
     have q := Nat.add_sub_of_le p
     simp [h1, q]
 
-
 def generateAux {n:Nat} (f:Fin n → UInt8) : ∀(a:ByteArray) (j : Nat), a.size + j = n → ByteArray
 | a, 0, p => a
 | a, Nat.succ j, p =>
-  let q : a.size < n := by
-    apply Nat.add_le_implies_le_rhs j
-    apply Nat.le_of_eq
-    rw [Nat.add_comm]
-    simp [Nat.succ_add]
-    exact p
+  let q : a.size < n := Nat.eq_add_implies_lt p
   let r : (a.push (f ⟨a.size, q⟩)).size + j = n := by
-        simp [size_push, Nat.add_succ, Nat.succ_add]
+        simp only [size_push, Nat.succ_add]
         exact p
   generateAux f (a.push (f ⟨a.size, q⟩)) j r
 
@@ -183,5 +196,42 @@ theorem size_generateAux {n:Nat} (f:Fin n → UInt8) {a:ByteArray} (j:Nat) (p:a.
 
 theorem size_generate (n:Nat) (f:Fin n → UInt8) : (generate n f).size = n := by
   exact (size_generateAux _ _ _)
+
+def generateMapAux {n:Nat} (f:Fin n → ByteArray) : ∀(a:ByteArray) (i j : Nat), i + j = n → ByteArray
+| a, i, 0, p => a
+| a, i, Nat.succ j, p =>
+  have p2 : Nat.succ (j + i) = n := by
+         simp [Nat.add_comm j i]
+         exact p
+  let q : i < n := Nat.add_le_implies_le_rhs j (Nat.le_of_eq p2)
+  let r : Nat.succ i + j = n := by
+    simp [Nat.succ_add]
+    exact p
+  generateMapAux f (a ++ (f ⟨i, q⟩)) i.succ j r
+
+def generateMap (n:Nat) (f:Fin n → ByteArray) (limit := 0) : ByteArray :=
+  generateMapAux f (mkEmpty limit) 0 n (Nat.zero_add n)
+
+theorem size_generateMapAux_same {m n:Nat} (f:Fin n → ByteArray) (p : ∀(k:Fin n), (f k).size = m)
+   (a:ByteArray) (i j:Nat) (h:i + j = n)
+
+    : (generateMapAux f a i j h).size = a.size + m*j := by
+  revert a i h
+  induction j with
+  | zero =>
+    intros a i h
+    simp [generateMapAux]
+  | succ j ind =>
+    intros a i h
+    simp [generateMapAux]
+    apply Eq.trans
+    apply ind
+    simp [size_append, p, Nat.mul_succ, Nat.add_assoc, Nat.add_comm m]
+
+theorem size_generateMap_same (n:Nat) (f:Fin n → ByteArray) {m:Nat} (p : ∀(i:Fin n), (f i).size = m)
+   : (generateMap n f).size = n*m := by
+  simp [generateMap, size_generateMapAux_same f p]
+  simp [size_mkEmpty]
+  apply Nat.mul_comm
 
 end ByteArray
