@@ -1,6 +1,7 @@
 import Crypto.BitVec
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
+import Crypto.Matrix
 import Crypto.UInt8
 import Crypto.Vec
 import Crypto.Vector
@@ -61,6 +62,9 @@ def gfbits : Nat := 12
 def sys_t : Nat := 64
 
 @[reducible]
+def sys_n : Nat := 3488
+
+@[reducible]
 def pk_nrows : Nat := sys_t * gfbits
 
 @[reducible]
@@ -90,20 +94,41 @@ constant shake (w:Nat) (input: ByteArray) : ByteVec w
 @[reducible]
 def rw : Nat :=  N/8 + 4*(1 <<< gfbits) + sys_t * 2 + 32
 
---@[extern "lean_load_gf_array"]
---constant loadGfArray (r: ByteVec (2*sys_t)) : vec sys_t (vec 16 bit) -- FIXME: Make Uint16vec with sys_t elements
-
 def gfMask : UInt16 := (1 <<< 12) - 1
 
 @[reducible]
-def gf := vec 16 bit
+def GF := { x:UInt16 // x < (1<<<12) }
 
-def loadGf {n} (r: ByteVec n) (i:Nat) : gf :=
-  let w : vec 16 bit := Kind.ofUInt8 (r.get! i) ++ Kind.ofUInt8 (r.get! (i+1))
-  w &&& Kind.ofUInt16_lbf gfMask
+namespace GF
 
-def loadGfArray {n:Nat} (r: ByteVec (2*n)) : vec n gf :=
-  Kind.generateV n (λi => loadGf r (2*i.val))
+instance : Inhabited GF := ⟨⟨0, sorry⟩⟩
+
+protected def complement (x:GF) : GF := ⟨~~~x.val, sorry⟩
+protected def and (x y:GF) : GF := ⟨x.val &&& y.val, sorry⟩
+protected def or  (x y:GF) : GF := ⟨x.val ||| y.val, sorry⟩
+protected def xor  (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
+
+@[extern "lean_gf_mul"]
+protected constant mul (x y : GF) : GF
+
+-- FIXME: Define classes
+instance : Complement GF := ⟨GF.complement⟩
+instance : AndOp GF := ⟨GF.and⟩
+instance : OrOp GF := ⟨GF.or⟩
+instance : Xor GF := ⟨GF.xor⟩
+instance : Mul GF := ⟨GF.mul⟩
+
+instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩ }
+
+end GF
+
+def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
+  let f (x:UInt8) : UInt16 := UInt16.ofNat x.toNat
+  let w : UInt16 := f (r.get! (i+1)) <<< 8 ||| f (r.get! i)
+  ⟨w &&& gfMask, sorry⟩
+
+def loadGfArray {n:Nat} (r: ByteVec (2*n)) : Vector n GF :=
+  Vector.generate n (λi => loadGf r (2*i.val))
 
 def byteToUInt32 (v:UInt8) : UInt32 := UInt32.ofNat (v.toNat)
 
@@ -114,35 +139,84 @@ def load4 {n} (r: ByteVec n) (i:Nat) : UInt32 :=
 def load4Array {n:Nat} (r: ByteVec (4*n)) : Vector n UInt32 :=
   Vector.generate n (λi => load4 r (4*i.val))
 
-@[extern "lean_genpoly_gen"]
-constant genPolyGen (f : vec sys_t gf) : Option (ByteVec (2*sys_t))
+
+@[extern "lean_GF_mul"]
+constant GF_mul (x y : Vector sys_t GF) : Vector sys_t GF
+
+@[extern "lean_gf_iszero"]
+constant gf_iszero : GF -> GF
+
+@[extern "lean_gf_inv"]
+constant gf_inv : GF -> GF
+
+@[extern "lean_bitrev"]
+constant gf_bitrev : GF -> GF
+
+def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
+  let mut r := mat.get! j j
+  for i in range j (sys_t + 1 - j) do
+    for k in range (j+1) (sys_t - (j+i)) do
+      r := r ^^^ mat.get! i k
+  pure r
+
+def genPolyGenUpdate (mat : Matrix (sys_t+1) sys_t GF)
+                         (j : Nat)
+                         (inv : GF)
+                        : Matrix (sys_t+1) sys_t GF :=
+  Matrix.generate _ _ λr c =>
+    if r ≤ j then
+      0
+    else
+      if c = j then
+        inv * mat.get! r j
+      else
+        mat.get! r c ^^^ (inv * mat.get! r j * mat.get! j c)
+
+def genPolyGen (f : Vector sys_t GF) : Option (Vector sys_t GF) := Id.run do
+  let v0 : Vector sys_t GF := Vector.generate sys_t λi => if i = 0 then 1 else 0
+  let mut mat := Matrix.unfoldBy (GF_mul f) v0
+  for j in range 0 sys_t do
+    let r0 := mat.get! j j
+    let r := genPolyGen_mask mat j
+    let mask := gf_iszero r0
+    let r := r0 &&& ~~~mask ||| r &&& mask
+    if r = 0 then
+      return none
+    else
+      mat := genPolyGenUpdate mat j (gf_inv r)
+  some (mat.row! sys_t)
 
 def irr_bytes : Nat := sys_t * 2
 
 def cond_bytes : Nat := (1 <<< (gfbits-4))*(2*gfbits - 1)
 
 @[extern "lean_store_gf"]
-constant store_gf (irr : ByteVec (2*sys_t)) : ByteVec (2*sys_t)
+constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 
-@[extern "lean_pk_gen"]
-constant pk_gen (sk : ByteVec (2*sys_t)) (perm : Vector (1 <<< gfbits) UInt32)
-  : Option (PublicKey × ByteVec (2*(1 <<< gfbits)))
+@[extern "lean_init_pi"]
+constant init_pi (perm : Vector (1 <<< gfbits) UInt32)
+  : Option (Vector (1 <<< gfbits) GF)
+
+@[extern "lean_eval"]
+constant eval (sk : Vector sys_t GF) (x : GF) : GF
+
+@[extern "lean_pk_gen2"]
+constant pk_gen2 (inv : Vector sys_n GF) (L : Vector sys_n GF)
+  : Option PublicKey
 
 @[extern "lean_controlbitsfrompermutation"]
-constant controlBitsFromPermutation (pi : ByteVec (2*(1 <<< gfbits))) : ByteVec cond_bytes
+constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
 
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
-  let sk_input :=           r.extractN 0 (N/8)
-  let perm := load4Array  $ r.extractN (N/8) (4*(1 <<< gfbits))
-  let f    := loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
-  match genPolyGen f with
-  | none => none
-  | some irr =>
-    let sk := store_gf irr
-    match pk_gen sk perm with
-    | none => none
-    | some (pk, pi) =>
-      some ⟨pk, seed ++ ByteVec.ofUInt64lsb 0xffffffff ++ sk ++ controlBitsFromPermutation pi ++ sk_input⟩
+  let sk_input :=                      r.extractN 0 (N/8)
+  let irr ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
+
+  let pi  ← init_pi    $ load4Array  $ r.extractN (N/8) (4*(1 <<< gfbits))
+  let L := Vector.generate sys_n λi => gf_bitrev (pi.get! i)
+  let inv := Vector.generate sys_n (λi => gf_inv (eval irr (L.get! i)))
+
+  let pk ← pk_gen2 inv L
+  some ⟨pk, seed ++ ByteVec.ofUInt64lsb 0xffffffff ++ store_gf irr ++ controlBitsFromPermutation pi ++ sk_input⟩
 
 def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyPair × DRBG) := do
   let rec loop : ∀(seed: ByteVec 32) (attempts:Nat), Option KeyPair
@@ -169,22 +243,13 @@ def load_gf (src : ByteVec 2) : UInt16 :=
   ((src.get ⟨0, Nat.le.step Nat.le.refl⟩).toUInt16 <<< 8 ||| (src.get ⟨1, Nat.le.refl⟩).toUInt16) &&& gfmask
 
 @[extern "lean_crypto_gen_e_step1"]
-constant gen_e_step1 : @&(vec (2*sys_t) (vec 16 bit)) → Option (vec sys_t (vec 16 bit))
+constant gen_e_step1 : @&(Vector (2*sys_t) GF) → Option (vec sys_t (vec 16 bit))
 
 @[extern "lean_crypto_gen_e_step2"]
 constant gen_e_step2 : @&(vec sys_t (vec 16 bit)) → ByteVec sys_t
 
 @[extern "lean_crypto_gen_e_step3"]
 constant gen_e_step3 : @&(vec sys_t (vec 16 bit)) → @&(ByteVec sys_t) → ByteVec (N / 8)
-
-/-
-def hasDuplicate (v:vec sys_t (vec 16 bit)) : Bool := Id.run do
-  for i in [0:sys_t] do
-    for j in [0:i] do
-      if v.get! i = v.get! j then
-        return true
-  return false
--/
 
 def cGenE2 : ∀(drbg:DRBG) (attempts:Nat), Option (ByteVec (N / 8) × DRBG)
   | _, 0 =>
