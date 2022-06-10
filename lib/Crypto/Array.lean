@@ -165,4 +165,8 @@ theorem append_empty {α} (a:Array α) : a ++ empty = a := by
 theorem append_data {α} (a b:Array α) : (a ++ b).data = a.data ++ b.data := by
   admit
 
+theorem size_qsort {α} [Inhabited α] (a:Array α) (lt : α → α → Bool)
+  : Array.size (Array.qsort a lt) = a.size := by
+  admit
+
 end Array

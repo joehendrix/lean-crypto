@@ -1,5 +1,9 @@
 import Crypto
 
+-- Creates a vector [0..n)
+def byteSequence (n:Nat) : ByteVec n :=
+  ⟨ByteArray.sequence n, by admit⟩
+
 def main (args:List String): IO Unit := do
   match args with
   | [reqPath, rspPath] => do
@@ -7,7 +11,7 @@ def main (args:List String): IO Unit := do
       let mut seedArray : Array Seed := #[]
       let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write false
       for i in [0:10] do
-        let (seed, drbg2) := mkRandom drbg0 (vec 48 (vec 8 bit))
+        let (seed, drbg2) := randombytes drbg0 48
         drbg0 := drbg2
         fpReq.putStrLn s!"count = {i}"
         fpReq.putStrLn s!"seed = {seed.toHex}"

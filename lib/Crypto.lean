@@ -1,9 +1,7 @@
-import Crypto.BitVec
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.Matrix
 import Crypto.UInt8
-import Crypto.Vec
 import Crypto.Vector
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
@@ -13,28 +11,30 @@ instance : Coe (ByteVec n) ByteBuffer where
   coe := ByteVec.toBuffer
 
 structure DRBG where
-  key : BitVec 256
-  v : BitVec 128
+  key : ByteVec (256 / 8)
+  v : ByteVec (128 / 8)
 
 instance : Inhabited DRBG := ⟨Inhabited.default, Inhabited.default⟩
 
-open Kind
+def tryN {α:Type _ } (f:DRBG → Option α × DRBG)
+     : ∀(drbg:DRBG) (attempts:Nat), Option α × DRBG
+  | drbg, 0 =>
+    (none, drbg)
+  | drbg, Nat.succ attempts =>
+    match f drbg with
+    | (some ind, drbg) => (some ind, drbg)
+    | (none, drbg) => tryN f drbg attempts
+
+--open Kind
 
 @[reducible]
-def Seed := vec 48 (vec 8 bit)
+def Seed := ByteVec 48
 
 @[extern "lean_random_init"]
 constant randombytesInit : @&Seed → DRBG
 
 @[extern "lean_random_bytes"]
 constant randombytes (rbg:DRBG) (n:@&Nat) : ByteVec n × DRBG
-
-@[extern "lean_random_bits"]
-constant randombits (rbg:DRBG) (n:@&Nat) : BitVec n × DRBG
-
-def mkRandom (drbg:DRBG) (K:Kind) : K × DRBG :=
-  let ⟨b,d⟩ := randombits drbg K.width
-  ⟨⟨b⟩,d⟩
 
 def initKeypairSeedPrefix : ByteVec 1 := #v[64]
 
@@ -44,9 +44,9 @@ def initKeypairSeed (v:ByteVec 32) : ByteVec 33 := initKeypairSeedPrefix ++ v
 constant cryptoHash32b : ByteBuffer → ByteVec 32
 
 namespace Mceliece348864Ref
+
 def name : String := "mceliece348864"
-def publicKeyBytes : Nat := 261120
-def secretKeyBytes : Nat := 6492
+
 
 def plaintextBytes : Nat := 32
 
@@ -62,10 +62,17 @@ def gfbits : Nat := 12
 def sys_t : Nat := 64
 
 @[reducible]
-def sys_n : Nat := 3488
+def cond_bytes : Nat := (1 <<< (gfbits-4))*(2*gfbits - 1)
+
+def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
 @[reducible]
 def pk_nrows : Nat := sys_t * gfbits
+
+@[reducible]
+def pk_ncols : Nat := N - pk_nrows
+
+def publicKeyBytes : Nat := pk_nrows * (pk_ncols / 8)
 
 @[reducible]
 def synd_bytes : Nat := ((pk_nrows + 7)/8)
@@ -188,21 +195,69 @@ def genPolyGen (f : Vector sys_t GF) : Option (Vector sys_t GF) := Id.run do
 
 def irr_bytes : Nat := sys_t * 2
 
-def cond_bytes : Nat := (1 <<< (gfbits-4))*(2*gfbits - 1)
 
 @[extern "lean_store_gf"]
 constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 
-@[extern "lean_init_pi"]
-constant init_pi (perm : Vector (1 <<< gfbits) UInt32)
-  : Option (Vector (1 <<< gfbits) GF)
+-- Map used by init_pi
+structure Perm where
+  value : UInt32
+  idx : GF
+
+namespace Perm
+
+instance : Inhabited Perm := ⟨{ value := 0, idx := 0}⟩
+
+end Perm
+
+-- Generate random permutation from random uint32 array
+def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
+  : Option (Vector (1 <<< gfbits) GF) := Id.run do
+  -- Build vector associated input number to index
+  let v : Vector (1 <<< gfbits) Perm :=
+        Vector.generate _
+          (λi => { value := perm.get i, idx := OfNat.ofNat i.val })
+
+  -- Sort vector based on value to get random permutation
+  let lt (x y : Perm) : Bool := x.value < y.value
+  let v : Vector (1 <<< gfbits) Perm := Vector.qsort v lt
+
+  -- Check to see if we have duplicated values in sorted array
+  -- Failing to check can bias result
+  for i in range 0 (1 <<< gfbits - 1) do
+    if (v.get! i).value = (v.get! (i+1)).value then
+      return none
+
+  pure (some (Perm.idx <$> v))
 
 @[extern "lean_eval"]
 constant eval (sk : Vector sys_t GF) (x : GF) : GF
 
-@[extern "lean_pk_gen2"]
-constant pk_gen2 (inv : Vector sys_n GF) (L : Vector sys_n GF)
-  : Option PublicKey
+def pk_row_bytes : Nat := pk_ncols / 8
+
+@[extern "lean_init_mat"]
+constant init_mat (inv : @&(Vector N GF)) (L : @&(Vector N GF))
+  : Matrix pk_nrows (N/8) UInt8
+
+@[extern "lean_gaussian_elim_row"]
+constant gaussian_elim_row (m : @&(Matrix pk_nrows (N/8) UInt8)) (r: Nat)
+  : Option (Matrix pk_nrows (N/8) UInt8)
+
+def gaussian_elim (m : @&(Matrix pk_nrows (N/8) UInt8))
+  : Option (Matrix pk_nrows (N/8) UInt8) := Id.run do
+  let mut m := m
+  for i in range 0 pk_nrows do
+    match gaussian_elim_row m i with
+    | some m' => m := m'
+    | none => return none
+  pure (some m)
+
+-- Create public key from row matrix
+def init_pk (m : Matrix pk_nrows (N/8) UInt8) : PublicKey :=
+  ByteVec.generate publicKeyBytes λi =>
+    let r := i.val / pk_row_bytes
+    let c := i.val % pk_row_bytes
+    m.get! r (pk_nrows/8 + c)
 
 @[extern "lean_controlbitsfrompermutation"]
 constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
@@ -210,13 +265,16 @@ constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec co
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
   let sk_input :=                      r.extractN 0 (N/8)
   let irr ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
-
-  let pi  ← init_pi    $ load4Array  $ r.extractN (N/8) (4*(1 <<< gfbits))
-  let L := Vector.generate sys_n λi => gf_bitrev (pi.get! i)
-  let inv := Vector.generate sys_n (λi => gf_inv (eval irr (L.get! i)))
-
-  let pk ← pk_gen2 inv L
-  some ⟨pk, seed ++ ByteVec.ofUInt64lsb 0xffffffff ++ store_gf irr ++ controlBitsFromPermutation pi ++ sk_input⟩
+  let pi  ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
+  let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
+  let inv := Vector.generate N λi => gf_inv (eval irr (L.get! i))
+  let m ← gaussian_elim (init_mat inv L)
+  let pk := init_pk m
+  let sk := seed ++ ByteVec.ofUInt64lsb 0xffffffff
+                 ++ store_gf irr
+                 ++ controlBitsFromPermutation pi
+                 ++ sk_input
+  some ⟨pk, sk⟩
 
 def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyPair × DRBG) := do
   let rec loop : ∀(seed: ByteVec 32) (attempts:Nat), Option KeyPair
@@ -237,32 +295,45 @@ structure EncryptionResult where
   ss : Plaintext
   ct : Ciphertext
 
-def gfmask : UInt16 := UInt16.ofNat $ (1 <<< gfbits) - 1
+def gen_e_step0 (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n (Fin N)) := Id.run do
+  let mut ind : Array (Fin N) := Array.mkEmpty sys_t
+  for num in v.data do
+    let num := num.val.toNat
+    if lt : num < N then
+      ind := ind.push ⟨num, lt⟩
+      if eq:ind.size = n then
+        return (some ⟨ind, eq⟩)
+  pure none
 
-def load_gf (src : ByteVec 2) : UInt16 :=
-  ((src.get ⟨0, Nat.le.step Nat.le.refl⟩).toUInt16 <<< 8 ||| (src.get ⟨1, Nat.le.refl⟩).toUInt16) &&& gfmask
+def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := Id.run do
+  for i in range 1 (n-1) do
+    for j in range 0 i do
+      if lt_i : i < n then
+        if lt_j : j < n then
+          if v.get ⟨i, lt_i⟩ = v.get ⟨j, lt_j⟩ then
+            return true
+  pure false
 
-@[extern "lean_crypto_gen_e_step1"]
-constant gen_e_step1 : @&(Vector (2*sys_t) GF) → Option (vec sys_t (vec 16 bit))
+def gen_e_step1b (v : Vector (2*sys_t) GF) : Option (Vector sys_t (Fin N)) := do
+  let ind ← gen_e_step0 v sys_t
+  if has_duplicate ind then
+    none
+  else
+    some ind
 
-@[extern "lean_crypto_gen_e_step2"]
-constant gen_e_step2 : @&(vec sys_t (vec 16 bit)) → ByteVec sys_t
+def gen_e_step1 (drbg:DRBG) : Option (Vector sys_t (Fin N)) × DRBG :=
+  let (bytes, drbg) := randombytes drbg _
+  let a := loadGfArray bytes
+  match gen_e_step0 a sys_t with
+  | none => (none, drbg)
+  | some ind =>
+    if has_duplicate ind then
+      (none, drbg)
+    else
+      (some ind, drbg)
 
 @[extern "lean_crypto_gen_e_step3"]
-constant gen_e_step3 : @&(vec sys_t (vec 16 bit)) → @&(ByteVec sys_t) → ByteVec (N / 8)
-
-def cGenE2 : ∀(drbg:DRBG) (attempts:Nat), Option (ByteVec (N / 8) × DRBG)
-  | _, 0 =>
-    none
-  | drbg, Nat.succ attempts =>
-    let (bytes, drbg) := randombytes drbg _
-    let a := loadGfArray bytes
-    match gen_e_step1 a with
-    | none =>
-      cGenE2 drbg attempts
-    | some ind =>
-      let val := gen_e_step2 ind
-      some (gen_e_step3 ind (gen_e_step2 ind), drbg)
+constant gen_e_step3b (v: @&(Vector sys_t (Fin N))) : ByteVec (N / 8)
 
 @[extern "lean_crypto_syndrome"]
 constant cSyndrome : @&PublicKey
@@ -270,12 +341,13 @@ constant cSyndrome : @&PublicKey
                    → ByteVec synd_bytes
 
 def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × DRBG) := do
-  match cGenE2 drbg attempts with
-  | none => none
-  | some (e, drbg) =>
+  match tryN gen_e_step1 drbg attempts with
+  | (some ind, drbg) =>
+    let e   := gen_e_step3b ind
     let c   := cSyndrome pk e ++ cryptoHash32b (#b[2] ++ e)
     let key := cryptoHash32b $ #b[1] ++ e ++ c
     some (⟨key, c⟩, drbg)
+  | (none, _) => panic! "mkCryptoKemEnc def failure"
 
 @[extern "lean_decrypt"]
 constant decrypt (ct : @&(ByteVec synd_bytes)) (sk : @&(ByteVec (secretKeyBytes - 40))) : ByteVec (N / 8) × UInt8
@@ -290,7 +362,6 @@ def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Plaintext := Id.run $ d
   let m : UInt16 := (ret_decrypt ||| ret_confirm).toUInt16
   let m := m - 1
   let m := (m >>> 8 : UInt16).toUInt8
-
   -- Generate preimage
   let s := sk.extractN (40 + irr_bytes + cond_bytes) (N/8)
   let preimageX : ByteVec (N/8) := ~~~m &&& s

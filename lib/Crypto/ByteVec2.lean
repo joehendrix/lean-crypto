@@ -103,6 +103,8 @@ def ofUInt64lsb (v:UInt64) : ByteVec 8 :=
   let byte (i:UInt64) : UInt8 := OfNat.ofNat (v >>> (8 * i)).toNat
   ByteVec.fromList [byte 0, byte 1, byte 2, byte 3, byte 4, byte 5, byte 6, byte 7]
 
+protected def toHex {n:Nat} (a:ByteVec n) : String :=
+  a.data.foldl (λs b => s ++ b.toHex) ""
 
 end ByteVec
 

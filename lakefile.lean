@@ -12,7 +12,6 @@ def ffiOTarget (pkgDir srcPath : FilePath) (compiler: FilePath) (deps : List Fil
 
 def includeFlag (path:FilePath) : String := "-I" ++ path.toString
 
-
 def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
   let oFile := pkgDir / buildDir / cDir / "bindings.o"
   let srcTarget := inputFileTarget <| pkgDir / cDir / "bindings.cpp"
@@ -450,9 +449,6 @@ def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
      opensslTarget pkgDir $ base / "crypto" / "x509v3" / "v3_utl.c"
    ]
 
-
-
-
 def libcryptoTarget (pkgDir : FilePath) : FileTarget :=
   let libFile := pkgDir / buildDir / cDir / "libcrypto.a"
   let dependencies := opensslTargets pkgDir
@@ -462,6 +458,7 @@ package crypto (pkgDir) (args) {
   -- customize layout
   srcDir := "lib"
   libRoots := #[`Crypto]
+  moreLeancArgs := #["-O3"]
   -- specify the lib as an additional target
   moreLibTargets := #[libmceliece348864Target pkgDir, libkeccakTarget pkgDir, libcryptoTarget pkgDir]
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]

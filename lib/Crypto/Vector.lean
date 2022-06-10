@@ -34,4 +34,16 @@ instance (n:Nat) (α: Type _) [Inhabited α] : Inhabited (Vector n α) := ⟨Vec
 protected
 def zero {α : Type _} [OfNat α 0] (n:Nat) : Vector n α := Vector.replicate n 0
 
+protected def map {n:Nat} {α β : Type _} (f : α → β) (v : Vector n α) : Vector n β :=
+  Vector.generate n (λi => f (v.get i))
+
+instance : Functor (Vector n) where
+  map := Vector.map
+
+protected
+def qsort {n : Nat} {α : Type _} [Inhabited α] (v:Vector n α) (lt : α → α → Bool) : Vector n α :=
+  { data := Array.qsort v.data lt,
+    size_proof := Eq.trans (Array.size_qsort v.data lt) v.size_proof
+  }
+
 end Vector
