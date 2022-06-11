@@ -12,8 +12,11 @@ instance : Xor Bool := ⟨Bool.xor⟩
 
 end Bool
 
-@[reducible]
 def BitVec (n:Nat) := Fin (2^n)
+
+--structure BitVec (n:Nat) where
+--  val : Nat
+--  isLt : val < 2^n
 
 namespace BitVec
 
@@ -27,6 +30,14 @@ protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
 instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
   hAppend := BitVec.append
 
+protected def and (x y : BitVec n) : BitVec n := ⟨x.val &&& y.val, sorry⟩
+protected def or  (x y : BitVec n) : BitVec n := ⟨x.val ||| y.val, sorry⟩
+protected def xor (x y : BitVec n) : BitVec n := ⟨x.val ^^^ y.val, sorry⟩
+
+instance : AndOp (BitVec n) := ⟨BitVec.and⟩
+instance : OrOp (BitVec n) := ⟨BitVec.or⟩
+instance : Xor (BitVec n) := ⟨BitVec.xor⟩
+
 def lsb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
   (x.val &&& (1 <<< i)) ≠ 0
 
@@ -36,30 +47,40 @@ def lsb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   else
     x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
 
-def msb_fix (m:Nat) (i:Nat) : Nat :=
-  let j := (m-1)-i
-  -- Reverse bit order within bytes (see if we can fix this)
-  ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
+/-
+def msb_fix (m:Nat) (i:Nat) : Nat := (m-1)-i
 
 def msb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool := x.lsb_get! (msb_fix m i)
 
 def msb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   x.lsb_set! (msb_fix m i) c
+-/
 
-protected def toBinary (x:BitVec n) : String := Id.run do
-  let mut s : String := ""
-  for i in range 0 n do
-    s := s++ if x.lsb_get! i then "1" else "0"
-  pure s
+def msbb_fix (m:Nat) (i:Nat) : Nat :=
+  let j := (m-1)-i
+  -- Reverse bit order within bytes (see if we can fix this)
+  ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
 
-protected def toHex (x:BitVec n) : String := Id.run do
+def msbb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool := x.lsb_get! (msbb_fix m i)
+
+def msbb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
+  x.lsb_set! (msbb_fix m i) c
+
+protected def toBinary (x:BitVec n) : String :=
+  let l := Nat.toDigits 2 x.val
+  String.mk (List.replicate (n - l.length) '0' ++ l)
+
+protected def toHex (x:BitVec n) : String :=
+  let l := Nat.toDigits 16 x.val
+  String.mk (List.replicate (n/4 - l.length) '0' ++ l)
+
+protected def toHex2 (x:BitVec n) : String := Id.run do
   let mut s : String := ""
   for i in range 0 (n/8) do
     let b := UInt8.ofNat (x.val >>> (8*i))
     s := s ++ b.toHex
   pure s
-
-instance : ToString (BitVec n) := ⟨BitVec.toHex⟩
+instance : ToString (BitVec n) := ⟨BitVec.toHex2⟩
 
 def reverse (x:BitVec n) : BitVec n := Id.run do
   let mut r : Nat := 0
@@ -69,18 +90,34 @@ def reverse (x:BitVec n) : BitVec n := Id.run do
       r := r + 1
   pure ⟨r, sorry⟩
 
-protected def and (x y : BitVec n) : BitVec n := ⟨x.val &&& y.val, sorry⟩
-
-instance : AndOp (BitVec n) := ⟨BitVec.and⟩
 
 protected def foldl (f: α → Bool → α) (x: BitVec n) (a : α) : α := Id.run do
   let mut r := a
   for i in range 0 n do
-    r := f r (x.msb_get! i)
+    r := f r (x.msbb_get! i)
   pure r
 
-end BitVec
+protected def take_lsb (x:BitVec m) (n:Nat) : BitVec n :=
+  ⟨x.val &&& 1 <<< n - 1, sorry⟩
 
+protected def take_msb (x:BitVec m) (n:Nat) : BitVec n :=
+  ⟨x.val >>> (m-n), sorry⟩
+
+theorem eq_of_val_eq {n:Nat} : ∀ {x y : BitVec n}, Eq x.val y.val → Eq x y
+  | ⟨x,_⟩, _, rfl => rfl
+
+theorem ne_of_val_ne {n:Nat}  {i j : BitVec n} (h : Not (Eq i.val j.val)) : Not (Eq i j) :=
+  λh' => absurd (h' ▸ rfl) h
+
+protected def decideEq {n:Nat} : (a b : BitVec n) → Decidable (Eq a b) :=
+  fun ⟨i, _⟩ ⟨j, _⟩ =>
+    match decEq i j with
+    | isTrue h  => isTrue (eq_of_val_eq h)
+    | isFalse h => isFalse (ne_of_val_ne h)
+
+instance (n:Nat) : DecidableEq (BitVec n) := BitVec.decideEq
+
+end BitVec
 
 @[extern "lean_elt_from_bytevec"]
 constant eltFromByteVec {w:Nat} (r:Nat) (v:ByteVec w) : BitVec r
@@ -161,6 +198,11 @@ def init (m : Matrix pk_nrows (N/8) UInt8) : PublicKey :=
   Vector.generate pk_nrows λr =>
     let v := ByteVec.generate (pk_ncols / 8) (λc => m.get! r (pk_nrows/8 + c))
     eltFromByteVec pk_ncols v
+
+-- Create public key from row matrix
+def init2 (m : Vector pk_nrows (BitVec N)) : PublicKey :=
+  Vector.generate pk_nrows λr =>
+    (m.get! r).take_msb pk_ncols
 
 protected
 def toBytes (pk:PublicKey) : ByteVec Mceliece348864Ref.publicKeyBytes :=
@@ -280,8 +322,8 @@ constant GF_mul (x y : Vector sys_t GF) : Vector sys_t GF
 
 def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
   let mut r := mat.get! j j
-  for i in range j (sys_t + 1 - j) do
-    for k in range (j+1) (sys_t - (j+i)) do
+  for i in rangeH j (sys_t+1) do
+    for k in rangeH (j+1) sys_t do
       r := r ^^^ mat.get! i k
   pure r
 
@@ -350,9 +392,40 @@ constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 constant init_mat (inv : @&(Vector N GF)) (L : @&(Vector N GF))
   : Matrix pk_nrows (N/8) UInt8
 
+@[extern "lean_init_mat2"]
+constant init_mat2 (inv : @&(Vector N GF)) (L : @&(Vector N GF))
+  : Vector pk_nrows (BitVec N)
+
 @[extern "lean_gaussian_elim_row"]
 constant gaussian_elim_row (m : @&(Matrix pk_nrows (N/8) UInt8)) (r: Nat)
   : Option (Matrix pk_nrows (N/8) UInt8)
+
+@[extern "lean_gaussian_elim_row2"]
+constant gaussian_elim_row2 (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
+  : Option (Vector pk_nrows (BitVec N))
+
+--@[extern "lean_gaussian_elim_row"]
+def gaussian_elim_row3 (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
+  : Option (Vector pk_nrows (BitVec N)) := Id.run do
+  let mut mat_row := m.get! row
+  for k in rangeH (row+1) pk_nrows do
+    let mat_k := m.get! k
+    let mask1 := mat_row.msbb_get! row
+    let mask2 := mat_k.msbb_get! row
+    if mask1 ≠ mask2 then
+      mat_row := mat_row ^^^ mat_k
+  if not (mat_row.msbb_get! row) then
+    return none
+  let mut m := m
+  for k in range 0 pk_nrows do
+    if k = row then
+      m := m.set! k mat_row
+    else
+      let mat_k := m.get! k
+      if mat_k.msbb_get! row then
+        m := m.set! k (mat_k ^^^ mat_row)
+  pure (some m)
+
 
 def gaussian_elim (m : @&(Matrix pk_nrows (N/8) UInt8))
   : Option (Matrix pk_nrows (N/8) UInt8) := Id.run do
@@ -360,6 +433,16 @@ def gaussian_elim (m : @&(Matrix pk_nrows (N/8) UInt8))
   for i in range 0 pk_nrows do
     match gaussian_elim_row m i with
     | some m' => m := m'
+    | none => return none
+  pure (some m)
+
+def gaussian_elim2 (m : Vector pk_nrows (BitVec N))
+  : Option (Vector pk_nrows (BitVec N)) := Id.run do
+  let mut m := m
+  for i in range 0 pk_nrows do
+    match gaussian_elim_row2 m i with
+    | some m1 =>
+      m := m1
     | none => return none
   pure (some m)
 
@@ -371,9 +454,8 @@ def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := d
   let pi  ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
   let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
   let g' := g.push 1
-  let inv := Vector.generate N λi => gf_inv (eval g' (L.get! i))
-  let m ← gaussian_elim (init_mat inv L)
-  let pk := PublicKey.init m
+  let inv := (λx => gf_inv (eval g' x)) <$> L
+  let pk := PublicKey.init (← gaussian_elim (init_mat inv L))
   let sk := { seed := seed,
               goppa := g,
               controlbits := controlBitsFromPermutation pi
@@ -407,7 +489,7 @@ def tryGenerateRandomErrors (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n
   pure none
 
 def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := Id.run do
-  for i in range 1 (n-1) do
+  for i in rangeH 1 n do
     for j in range 0 i do
       if lt_i : i < n then
         if lt_j : j < n then
@@ -418,7 +500,7 @@ def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := 
 def generateErrorBitmask (a: Vector sys_t (Fin N)) : BitVec N := Id.run do
   let mut e : BitVec N := BitVec.zero N
   for v in a.data do
-    e := e.msb_set! v.val true
+    e := e.msbb_set! v.val true
   pure e
 
 def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
@@ -441,10 +523,10 @@ def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
 def cSyndrome (pk : PublicKey) (e: BitVec N) : BitVec pk_nrows := Id.run do
   let mut s : BitVec pk_nrows := BitVec.zero _
   for i in range 0 pk_nrows do
-    let off := (BitVec.zero pk_nrows).msb_set! i True
+    let off := (BitVec.zero pk_nrows).msbb_set! i True
     let row : BitVec N := off ++ pk.get! i
     if (row &&& e).foldl Bool.xor false then
-      s := s.msb_set! i True
+      s := s.msbb_set! i True
   pure s
 
 @[reducible]
@@ -506,7 +588,7 @@ def synd
   let mut out := Vector.replicate (2*sys_t) 0
   let f := g.push 1
   for i in range 0 N do
-    if error_bitmask.msb_get! i then
+    if error_bitmask.msbb_get! i then
       let e := eval f (l.get! i)
       let mut e_inv := gf_inv (e * e)
       for j in range 0 (2*sys_t) do
@@ -519,11 +601,17 @@ constant bm
     (s: @&(Vector (2*sys_t) GF))
    : Vector (sys_t+1) GF
 
-@[extern "lean_decrypt"]
 constant decrypt
     (images : @&(Vector N GF))
     (s: @&(Vector (2*sys_t) GF))
-   : Nat × BitVec N
+   : Nat × BitVec N := Id.run do
+  let mut w : Nat := 0
+  let mut e : BitVec N := BitVec.zero _
+  for i in range 0 N do
+    if gf_iszero (images.get! i) &&& 1 = 1 then
+      e := e.msbb_set! i True
+      w := w + 1
+  pure (w, e)
 
 def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Option Plaintext := do
   let g := sk.goppa

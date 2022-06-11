@@ -7,6 +7,9 @@ structure Range where
 
 def range (l n:Nat) : Range := ⟨l, n⟩
 
+def rangeH (l h:Nat) : Range := ⟨l, h-l⟩
+
+
 namespace Range
 
 protected
