@@ -594,44 +594,6 @@ static inline unsigned char same_mask(uint16_t x, uint16_t y)
     }
 }
 
-
-// e has length SYS_N/8
-// ind has length SYS_T
-// val has length SYS_T
-static void gen_e_step3(unsigned char* e, const uint16_t* ind) {
-	for (int i = 0; i < SYS_N/8; i++) {
-        unsigned char ei = 0;
-		for (int j = 0; j < SYS_T; j++) {
-            uint16_t indj = ind[j] >> 3;
-			if (i == indj)
-                ei = ei | (1 << (ind[j] & 7));
-		}
-		e[i] = ei;
-	}
-}
-
-
-extern "C" lean_obj_res lean_crypto_gen_e_step3(b_lean_obj_arg ind_obj) {
-
-    assert(lean_array_size(ind_obj) == SYS_T);
-
-    uint16_t ind[SYS_T];
-    for (size_t i = 0; i != SYS_T; ++i) {
-        b_lean_obj_arg x = lean_array_get_core(ind_obj, i);
-        if (LEAN_UNLIKELY(!lean_is_scalar(x))) {
-            lean_internal_panic_out_of_memory();
-        }
-        size_t xlen = lean_unbox(x);
-        assert(xlen <= SYS_N);
-        ind[i] = xlen;
-    }
-
-    uint8_t e[SYS_N/8];
-    gen_e_step3(e, ind);
-
-    return nat_import_from_bytes(SYS_N/8, e);
-}
-
 /* input: public key pk, error vector e */
 /* output: syndrome s */
 static void syndrome(unsigned char *s, const unsigned char *pk, unsigned char *e)

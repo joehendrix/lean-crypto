@@ -19,11 +19,20 @@ protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
 instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
   hAppend := BitVec.append
 
-def lsb_index {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
+def lsb_fix (m:Nat) (i:Nat) : Nat :=
   let j := (m-1)-i
   -- Reverse bit order within bytes (see if we can fix this)
-  let k := ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
-  (x.val &&& (1 <<< k)) ≠ 0
+  ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
+
+def lsb_index {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
+  (x.val &&& (1 <<< lsb_fix m i)) ≠ 0
+
+def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m := do
+  let i := lsb_fix m i
+  if c then
+    x ||| ⟨1 <<< i, sorry⟩
+  else
+    x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
 
 end BitVec
 
@@ -125,6 +134,15 @@ instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry�
 
 end GF
 
+@[extern "lean_gf_iszero"]
+constant gf_iszero : GF -> GF
+
+@[extern "lean_gf_inv"]
+constant gf_inv : GF -> GF
+
+@[extern "lean_bitrev"]
+constant gf_bitrev : GF -> GF
+
 def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
   let f (x:UInt8) : UInt16 := UInt16.ofNat x.toNat
   let w : UInt16 := f (r.get! (i+1)) <<< 8 ||| f (r.get! i)
@@ -186,15 +204,6 @@ def load4Array {n:Nat} (r: ByteVec (4*n)) : Vector n UInt32 :=
 
 @[extern "lean_GF_mul"]
 constant GF_mul (x y : Vector sys_t GF) : Vector sys_t GF
-
-@[extern "lean_gf_iszero"]
-constant gf_iszero : GF -> GF
-
-@[extern "lean_gf_inv"]
-constant gf_inv : GF -> GF
-
-@[extern "lean_bitrev"]
-constant gf_bitrev : GF -> GF
 
 def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
   let mut r := mat.get! j j
@@ -323,7 +332,7 @@ def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyP
   | none => none
   | some p => some (p, drbg)
 
-def gen_e_step0 (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n (Fin N)) := Id.run do
+def tryGenerateRandomErrors (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n (Fin N)) := Id.run do
   let mut ind : Array (Fin N) := Array.mkEmpty sys_t
   for num in v.data do
     let num := num.val.toNat
@@ -342,29 +351,32 @@ def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := 
             return true
   pure false
 
-def gen_e_step1b (v : Vector (2*sys_t) GF) : Option (Vector sys_t (Fin N)) := do
-  let ind ← gen_e_step0 v sys_t
-  if has_duplicate ind then
-    none
-  else
-    some ind
+def generateErrorBitmask (a: Vector sys_t (Fin N)) : BitVec N := Id.run do
+  let mut e : BitVec N := BitVec.zero N
+  for v in a.data do
+    e := e.lsb_set v.val true
+  pure e
 
-def gen_e_step1 (drbg:DRBG) : Option (Vector sys_t (Fin N)) × DRBG :=
-  let (bytes, drbg) := randombytes drbg _
-  let a := loadGfArray bytes
-  match gen_e_step0 a sys_t with
-  | none => (none, drbg)
-  | some ind =>
-    if has_duplicate ind then
-      (none, drbg)
-    else
-      (some ind, drbg)
+def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
+  let (bytes, drbg) := randombytes drbg (4*sys_t)
+  let input : Vector (2*sys_t) GF := loadGfArray bytes
+
+  let mut a : Array (Fin N) := Array.mkEmpty sys_t
+  for (num : GF) in input.data do
+    let num : Nat := num.val.toNat
+    if lt : num < N then
+      a := a.push ⟨num, lt⟩
+      -- Check to see if done
+      if eq:a.size = sys_t then
+        let v : Vector sys_t (Fin N) := ⟨a, eq⟩
+        if has_duplicate v then
+          return (none, drbg)
+        return (some (generateErrorBitmask v), drbg)
+  pure ⟨none, drbg⟩
 
 @[extern "lean_elt_to_bytevec"]
 constant eltToByteVec {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 
-@[extern "lean_crypto_gen_e_step3"]
-constant gen_e_step3 (v: @&(Vector sys_t (Fin N))) : BitVec N
 
 @[extern "lean_crypto_syndrome"]
 constant cSyndrome (pk: @&PublicKey)
@@ -410,12 +422,11 @@ structure EncryptionResult where
   ct : Ciphertext
 
 def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × DRBG) := do
-  match tryN gen_e_step1 drbg attempts with
-  | (some ind, drbg) =>
-    let e   := gen_e_step3 ind
+  match tryN tryGenerateErrors drbg attempts with
+  | (some e, drbg) =>
     let c   := { syndrome := cSyndrome pk e,
                  hash := Ciphertext.mkHash e
-                 }
+                }
     let plaintext := { e := e, c := c }
     some ({ ss := plaintext, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
@@ -426,18 +437,17 @@ constant support_gen (controlbits : @&(ByteVec cond_bytes)) : Vector N GF
 def synd
     (g: @&(Vector sys_t GF))
     (l : @&(Vector N GF))
-    (r : @&(BitVec N))
+    (error_bitmask : @&(BitVec N))
    : Vector (2*sys_t) GF := Id.run do
   let mut out := Vector.replicate (2*sys_t) 0
   let f := g.push 1
   for i in range 0 N do
-    let c : Bool := r.lsb_index i
-    let e := eval f (l.get! i)
-    let mut e_inv := gf_inv (e * e)
-    for j in range 0 (2*sys_t) do
-      if c then
+    if error_bitmask.lsb_index i then
+      let e := eval f (l.get! i)
+      let mut e_inv := gf_inv (e * e)
+      for j in range 0 (2*sys_t) do
         out := out.set! j (out.get! j + e_inv)
-      e_inv := e_inv * l.get! i
+        e_inv := e_inv * l.get! i
   pure out
 
 @[extern "lean_bm"]
