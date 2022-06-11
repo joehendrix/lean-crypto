@@ -191,18 +191,12 @@ def PublicKey := Vector pk_nrows (BitVec pk_ncols)
 
 namespace PublicKey
 
+-- Create public key from row matrix
+def init (m : Vector pk_nrows (BitVec N)) : PublicKey :=
+  Vector.generate pk_nrows λr =>
+    (m.get! r).take_lsb pk_ncols
+
 def pk_row_bytes : Nat := pk_ncols / 8
-
--- Create public key from row matrix
-def init (m : Matrix pk_nrows (N/8) UInt8) : PublicKey :=
-  Vector.generate pk_nrows λr =>
-    let v := ByteVec.generate (pk_ncols / 8) (λc => m.get! r (pk_nrows/8 + c))
-    eltFromByteVec pk_ncols v
-
--- Create public key from row matrix
-def init2 (m : Vector pk_nrows (BitVec N)) : PublicKey :=
-  Vector.generate pk_nrows λr =>
-    (m.get! r).take_msb pk_ncols
 
 protected
 def toBytes (pk:PublicKey) : ByteVec Mceliece348864Ref.publicKeyBytes :=
@@ -390,22 +384,9 @@ constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 
 @[extern "lean_init_mat"]
 constant init_mat (inv : @&(Vector N GF)) (L : @&(Vector N GF))
-  : Matrix pk_nrows (N/8) UInt8
-
-@[extern "lean_init_mat2"]
-constant init_mat2 (inv : @&(Vector N GF)) (L : @&(Vector N GF))
   : Vector pk_nrows (BitVec N)
 
-@[extern "lean_gaussian_elim_row"]
-constant gaussian_elim_row (m : @&(Matrix pk_nrows (N/8) UInt8)) (r: Nat)
-  : Option (Matrix pk_nrows (N/8) UInt8)
-
-@[extern "lean_gaussian_elim_row2"]
-constant gaussian_elim_row2 (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
-  : Option (Vector pk_nrows (BitVec N))
-
---@[extern "lean_gaussian_elim_row"]
-def gaussian_elim_row3 (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
+def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
   : Option (Vector pk_nrows (BitVec N)) := Id.run do
   let mut mat_row := m.get! row
   for k in rangeH (row+1) pk_nrows do
@@ -426,21 +407,11 @@ def gaussian_elim_row3 (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
         m := m.set! k (mat_k ^^^ mat_row)
   pure (some m)
 
-
-def gaussian_elim (m : @&(Matrix pk_nrows (N/8) UInt8))
-  : Option (Matrix pk_nrows (N/8) UInt8) := Id.run do
-  let mut m := m
-  for i in range 0 pk_nrows do
-    match gaussian_elim_row m i with
-    | some m' => m := m'
-    | none => return none
-  pure (some m)
-
-def gaussian_elim2 (m : Vector pk_nrows (BitVec N))
+def gaussian_elim (m : Vector pk_nrows (BitVec N))
   : Option (Vector pk_nrows (BitVec N)) := Id.run do
   let mut m := m
   for i in range 0 pk_nrows do
-    match gaussian_elim_row2 m i with
+    match gaussian_elim_row m i with
     | some m1 =>
       m := m1
     | none => return none
