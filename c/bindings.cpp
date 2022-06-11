@@ -1,6 +1,5 @@
 
 #define CRYPTO_NAMESPACE(x) x
-
 #include <lean/lean.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +14,6 @@ extern "C" {
 #include "decrypt.h"
 #include "params.h"
 #include "sk_gen.h"
-#include "root.h"
 #include "uint64_sort.h"
 #include "util.h"
 
@@ -24,6 +22,7 @@ extern "C" {
 #include <openssl/err.h>
 
 }
+#include <gmp.h>
 
 namespace lean {
     lean_obj_res io_wrap_handle(FILE * hfile);
@@ -64,6 +63,48 @@ void handleErrors(void)
 {
     ERR_print_errors_fp(stderr);
     abort();
+}
+
+extern "C" LEAN_EXPORT lean_object * lean_alloc_mpz(mpz_t v);
+extern "C" LEAN_EXPORT void lean_extract_mpz_value(lean_object * o, mpz_t v);
+
+static lean_obj_res nat_import_from_bytes(size_t n, const unsigned char* a) {
+    if (n == 0)
+        return lean_box(0);
+    mpz_t r;
+    mpz_init2(r, 8*n);
+    mpz_import(r, n, 1, 1, -1, 0, a);
+
+    if (mpz_cmp_ui(r, LEAN_MAX_SMALL_NAT) <= 0) {
+        printf("UNEXPECTED %d\n", n);
+        assert(0);
+        lean_obj_res o = lean_box(mpz_get_ui(r));
+        mpz_clear(r);
+        return o;
+    }
+    return lean_alloc_mpz(r);
+}
+
+static void nat_export_to_bytes(size_t n, unsigned char* a, b_lean_obj_arg x) {
+    if (n == 0)
+        return;
+    mpz_t xz;
+    if (lean_is_scalar(x)) {
+        mpz_init_set_ui(xz, lean_unbox(x));
+    } else {
+        mpz_init(xz);
+        lean_extract_mpz_value(x, xz);
+    }
+
+    size_t count;
+    mpz_export(a, &count, 1, 1, -1, 0, xz);
+    assert(count <= n);
+    if (count < n) {
+        memmove(a + (n-count), a, count);
+        memset(a, 0, n-count);
+    }
+    // Set remaining bits
+    mpz_clear(xz);
 }
 
 /*
@@ -216,6 +257,10 @@ extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in
     shake(lean_sarray_cptr(r_obj), size, lean_sarray_cptr(in_obj), lean_sarray_size(in_obj));
 
     return r_obj;
+}
+
+extern "C" uint16_t lean_gf_add(uint16_t x, uint16_t y) {
+    return gf_add(x, y);
 }
 
 extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
@@ -476,11 +521,9 @@ extern "C" uint16_t lean_bitrev(uint16_t x) {
 
 extern "C"  uint16_t lean_eval(b_lean_obj_arg g_obj, uint16_t x) {
 	gf g[ SYS_T+1 ]; // Goppa polynomial
-    for (size_t i = 0; i != SYS_T; ++i) {
+    for (size_t i = 0; i != SYS_T+1; ++i) {
         g[i] = lean_unbox_uint32(lean_array_get_core(g_obj, i));
     }
-	g[ SYS_T ] = 1;
-
     return my_eval(g, x);
 }
 
@@ -583,36 +626,34 @@ extern "C" lean_obj_res lean_crypto_gen_e_step3(b_lean_obj_arg ind_obj) {
         ind[i] = xlen;
     }
 
-    lean_obj_res e_array = lean_alloc_sarray1(1, SYS_N/8);
-    uint8_t* e = lean_sarray_cptr(e_array);
-	gen_e_step3(e, ind);
-    return e_array;
+    uint8_t e[SYS_N/8];
+    gen_e_step3(e, ind);
+
+    return nat_import_from_bytes(SYS_N/8, e);
 }
 
 /* input: public key pk, error vector e */
 /* output: syndrome s */
 static void syndrome(unsigned char *s, const unsigned char *pk, unsigned char *e)
 {
-	unsigned char b, row[SYS_N/8];
-	const unsigned char *pk_ptr = pk;
 
-	int i, j;
-
-	for (i = 0; i < SYND_BYTES; i++)
+	for (int i = 0; i < SYND_BYTES; i++)
 		s[i] = 0;
 
-	for (i = 0; i < PK_NROWS; i++)
-	{
-		for (j = 0; j < SYS_N/8; j++)
+	for (int i = 0; i < PK_NROWS; i++) {
+    	const unsigned char *pk_ptr = pk + PK_ROW_BYTES * i;
+
+        unsigned char row[SYS_N/8];
+		for (int j = 0; j < SYS_N/8; j++)
 			row[j] = 0;
 
-		for (j = 0; j < PK_ROW_BYTES; j++)
+		for (int j = 0; j < PK_ROW_BYTES; j++)
 			row[ SYS_N/8 - PK_ROW_BYTES + j ] = pk_ptr[j];
 
 		row[i/8] |= 1 << (i%8);
 
-		b = 0;
-		for (j = 0; j < SYS_N/8; j++)
+    	unsigned char b = 0;
+		for (int j = 0; j < SYS_N/8; j++)
 			b ^= row[j] & e[j];
 
 		b ^= b >> 4;
@@ -620,43 +661,203 @@ static void syndrome(unsigned char *s, const unsigned char *pk, unsigned char *e
 		b ^= b >> 1;
 		b &= 1;
 
-		s[ i/8 ] |= (b << (i%8));
-
-		pk_ptr += PK_ROW_BYTES;
+        s[ i/8 ] |= (b << (i%8));
 	}
 }
 
-extern "C" lean_obj_res lean_crypto_syndrome(b_lean_obj_arg pk_array, b_lean_obj_arg e_array) {
+extern "C" lean_obj_res lean_crypto_syndrome(b_lean_obj_arg pk_array, b_lean_obj_arg e_obj) {
     uint8_t* pk = lean_sarray_cptr(pk_array);
-    uint8_t* e = lean_sarray_cptr(e_array);
 
-    lean_obj_res s_array = lean_alloc_sarray1(1, SYND_BYTES);
-    uint8_t* s = lean_sarray_cptr(s_array);
+	unsigned char e[SYS_N/8];
+    nat_export_to_bytes(SYS_N/8, e, e_obj);
 
+    unsigned char s[SYND_BYTES];
 	syndrome(s, pk, e);
-
-    return s_array;
+    return nat_import_from_bytes(SYND_BYTES, s);
 }
 
-extern "C" lean_obj_res lean_crypto_hash_32b(b_lean_obj_arg input) {
-    lean_obj_res key_array = lean_alloc_sarray1(1, crypto_kem_BYTES);
-    uint8_t* key = lean_sarray_cptr(key_array);
+extern "C" void bm(gf *, gf *);
+extern "C" void support_gen(gf *, const unsigned char *);
 
-	SHAKE256(key, 32, lean_sarray_cptr(input), lean_sarray_size(input));
+extern "C" gf bitrev(gf a);
+extern "C" void apply_benes(unsigned char * r, const unsigned char * bits, int rev);
 
-    return key_array;
+
+/* input: condition bits c */
+/* output: support s */
+void my_support_gen(gf * s, const unsigned char *c) {
+	unsigned char L[ GFBITS ][ (1 << GFBITS)/8 ];
+	for (int i = 0; i < GFBITS; i++)
+		for (int j = 0; j < (1 << GFBITS)/8; j++)
+			L[i][j] = 0;
+
+	for (int i = 0; i < (1 << GFBITS); i++)
+	{
+		gf a = bitrev((gf) i);
+
+		for (int j = 0; j < GFBITS; j++)
+			L[j][ i/8 ] |= ((a >> j) & 1) << (i%8);
+	}
+
+	for (int j = 0; j < GFBITS; j++)
+		apply_benes(L[j], c, 0);
+
+	for (int i = 0; i < SYS_N; i++) {
+		s[i] = 0;
+		for (int j = GFBITS-1; j >= 0; j--)
+		{
+			s[i] <<= 1;
+			s[i] |= (L[j][i/8] >> (i%8)) & 1;
+		}
+	}
 }
 
-extern "C" lean_obj_res lean_decrypt(b_lean_obj_arg ct_array, b_lean_obj_arg sk_array) {
-    uint8_t* sk = lean_sarray_cptr(sk_array);
-    uint8_t* c = lean_sarray_cptr(ct_array);
-    lean_obj_res e_array = lean_alloc_sarray1(1, SYS_N/8);
-    uint8_t* e = lean_sarray_cptr(e_array);
+#define min(a, b) ((a < b) ? a : b)
 
-	unsigned char ret_decrypt = decrypt(e, sk, c);
+/* the Berlekamp-Massey algorithm */
+/* input: s, sequence of field elements */
+/* output: out, minimal polynomial of s */
+static
+void my_bm(gf *out, const gf *s)
+{
+	//
 
-    lean_object * r = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(r, 0, e_array);
-    lean_ctor_set(r, 1, lean_box(ret_decrypt));
-    return r;
+	gf B[SYS_T+1];
+	for (int i = 0; i < SYS_T+1; i++)
+		B[i] = 0;
+	B[1] = 1;
+
+	gf C[SYS_T+1];
+	for (int i = 0; i < SYS_T+1; i++)
+		C[i] = 0;
+	C[0] = 1;
+
+
+	uint16_t L = 0;
+	gf b = 1;
+
+	//
+	for (uint16_t N = 0; N < 2 * SYS_T; N++) {
+		gf d = 0;
+		for (int i = 0; i <= min(N, SYS_T); i++)
+			d ^= gf_mul(C[i], s[ N-i]);
+
+		gf mne = ((d-1)>>15)-1;
+        gf mle = N; mle -= 2*L; mle >>= 15; mle -= 1;
+		mle &= mne;
+
+    	gf T[ SYS_T+1  ];
+		for (int i = 0; i <= SYS_T; i++)
+			T[i] = C[i];
+
+        gf f = gf_frac(b, d);
+
+		for (int i = 0; i <= SYS_T; i++)
+			C[i] ^= gf_mul(f, B[i]) & mne;
+
+		L = (L & ~mle) | ((N+1-L) & mle);
+
+		for (int i = 0; i <= SYS_T; i++)
+			B[i] = (B[i] & ~mle) | (T[i] & mle);
+
+		b = (b & ~mle) | (d & mle);
+
+		for (int i = SYS_T; i >= 1; i--)
+            B[i] = B[i-1];
+		B[0] = 0;
+	}
+
+	for (int i = 0; i <= SYS_T; i++)
+		out[i] = C[ SYS_T-i ];
+}
+
+/* Niederreiter decryption with the Berlekamp decoder */
+// intput: g, goppy poly
+//         sk, secret key
+//         c, ciphertext
+// output: e, error vector
+// return: 0 for success; 1 for failure
+static int my_decrypt(unsigned char *e,
+                      gf* images,
+                      const gf* s)
+{
+	//
+
+	for (int i = 0; i < SYS_N/8; i++)
+		e[i] = 0;
+
+	int w = 0;
+	for (int i = 0; i < SYS_N; i++) {
+	    gf t = gf_iszero(images[i]) & 1;
+
+		e[ i/8 ] |= t << (i%8);
+		w += t;
+	}
+
+    return w;
+}
+
+extern "C" lean_obj_res lean_support_gen(b_lean_obj_arg sk_obj) {
+    assert(lean_sarray_size(sk_obj) == COND_BYTES);
+    const uint8_t* sk = lean_sarray_cptr(sk_obj);
+
+	gf L[ SYS_N ];
+	support_gen(L, sk);
+
+    lean_obj_res L_obj = lean_alloc_array(SYS_N, SYS_N);
+    for (size_t i = 0; i != SYS_N; ++i) {
+        lean_array_set_core(L_obj, i, lean_box_uint32(L[i]));
+    }
+    return L_obj;
+}
+
+extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t w = lean_unbox(w_obj);
+
+    lean_obj_res e_obj = lean_alloc_sarray1(1, w);
+    nat_export_to_bytes(w, lean_sarray_cptr(e_obj), x);
+    return e_obj;
+}
+
+static void init_gf_array(gf* s, b_lean_obj_arg obj) {
+    for (size_t i = 0; i != lean_array_size(obj); ++i) {
+        s[i] = lean_unbox_uint32(lean_array_get_core(obj, i));
+    }
+}
+
+extern "C" lean_obj_res lean_bm(b_lean_obj_arg s_obj, b_lean_obj_arg s2_obj) {
+    assert(lean_array_size(s_obj) == 2*SYS_T);
+	gf s[2*SYS_T];
+    init_gf_array(s, s_obj);
+
+	gf locator[ SYS_T+1 ];
+	my_bm(locator, s);
+
+    lean_obj_res locator_obj = lean_alloc_array(SYS_T+1, SYS_T+1);
+    for (size_t i = 0; i != SYS_T+1; ++i) {
+        lean_array_set_core(locator_obj, i, lean_box_uint32(locator[i]));
+    }
+    return locator_obj;
+}
+
+extern "C" lean_obj_res lean_decrypt(b_lean_obj_arg images_obj, b_lean_obj_arg s_obj) {
+    assert(lean_array_size(images_obj) == SYS_N);
+	gf images[SYS_N];
+    for (size_t i = 0; i != SYS_N; ++i) {
+        images[i] = lean_unbox_uint32(lean_array_get_core(images_obj, i));
+    }
+
+   assert(lean_array_size(s_obj) == 2*SYS_T);
+	gf s[2*SYS_T];
+    for (size_t i = 0; i != 2*SYS_T; ++i) {
+        s[i] = lean_unbox_uint32(lean_array_get_core(s_obj, i));
+    }
+
+
+    uint8_t e[SYS_N/8];
+    int w = my_decrypt(e, images, s);
+    return lean_mk_pair(lean_box(w), nat_import_from_bytes(SYS_N/8, e));
 }

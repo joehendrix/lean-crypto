@@ -4,6 +4,29 @@ import Crypto.Matrix
 import Crypto.UInt8
 import Crypto.Vector
 
+@[reducible]
+def BitVec (n:Nat) := Fin (2^n)
+
+namespace BitVec
+
+protected def zero (n:Nat) : BitVec n := ⟨0, sorry⟩
+
+instance : Inhabited (BitVec n) := ⟨BitVec.zero n⟩
+
+protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
+  ⟨x.val <<< n ||| y.val, sorry⟩
+
+instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
+  hAppend := BitVec.append
+
+def lsb_index {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
+  let j := (m-1)-i
+  -- Reverse bit order within bytes (see if we can fix this)
+  let k := ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
+  (x.val &&& (1 <<< k)) ≠ 0
+
+end BitVec
+
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
 
@@ -40,18 +63,14 @@ def initKeypairSeedPrefix : ByteVec 1 := #v[64]
 
 def initKeypairSeed (v:ByteVec 32) : ByteVec 33 := initKeypairSeedPrefix ++ v
 
-@[extern "lean_crypto_hash_32b"]
-constant cryptoHash32b : ByteBuffer → ByteVec 32
+@[extern "lean_shake256"]
+constant shake (w:Nat) (input: ByteArray) : ByteVec w
+
+def cryptoHash32b (b:ByteArray) : ByteVec 32 := shake 32 b
 
 namespace Mceliece348864Ref
 
 def name : String := "mceliece348864"
-
-
-def plaintextBytes : Nat := 32
-
-@[reducible]
-def ciphertextBytes : Nat := 128
 
 def N := 3488
 
@@ -64,8 +83,6 @@ def sys_t : Nat := 64
 @[reducible]
 def cond_bytes : Nat := (1 <<< (gfbits-4))*(2*gfbits - 1)
 
-def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
-
 @[reducible]
 def pk_nrows : Nat := sys_t * gfbits
 
@@ -74,37 +91,13 @@ def pk_ncols : Nat := N - pk_nrows
 
 def publicKeyBytes : Nat := pk_nrows * (pk_ncols / 8)
 
-@[reducible]
-def synd_bytes : Nat := ((pk_nrows + 7)/8)
-
 def PublicKey := ByteVec Mceliece348864Ref.publicKeyBytes
   deriving ToString
 
 @[reducible]
-def SecretKey := ByteVec Mceliece348864Ref.secretKeyBytes
-  deriving ToString
-
-def Plaintext := ByteVec Mceliece348864Ref.plaintextBytes
-  deriving DecidableEq, Inhabited, ToString
-
-@[reducible]
-def Ciphertext := ByteVec Mceliece348864Ref.ciphertextBytes
-  deriving ToString
-
-structure KeyPair where
-  pk : PublicKey
-  sk : SecretKey
-
-@[extern "lean_shake256"]
-constant shake (w:Nat) (input: ByteArray) : ByteVec w
-
-@[reducible]
-def rw : Nat :=  N/8 + 4*(1 <<< gfbits) + sys_t * 2 + 32
+def GF := { x:UInt16 // x < (1<<<12) }
 
 def gfMask : UInt16 := (1 <<< 12) - 1
-
-@[reducible]
-def GF := { x:UInt16 // x < (1<<<12) }
 
 namespace GF
 
@@ -115,14 +108,17 @@ protected def and (x y:GF) : GF := ⟨x.val &&& y.val, sorry⟩
 protected def or  (x y:GF) : GF := ⟨x.val ||| y.val, sorry⟩
 protected def xor  (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
 
+@[extern "lean_gf_add"]
+protected constant add (x y : GF) : GF
+
 @[extern "lean_gf_mul"]
 protected constant mul (x y : GF) : GF
 
--- FIXME: Define classes
 instance : Complement GF := ⟨GF.complement⟩
 instance : AndOp GF := ⟨GF.and⟩
 instance : OrOp GF := ⟨GF.or⟩
 instance : Xor GF := ⟨GF.xor⟩
+instance : Add GF := ⟨GF.add⟩
 instance : Mul GF := ⟨GF.mul⟩
 
 instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩ }
@@ -136,6 +132,47 @@ def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
 
 def loadGfArray {n:Nat} (r: ByteVec (2*n)) : Vector n GF :=
   Vector.generate n (λi => loadGf r (2*i.val))
+
+@[extern "lean_store_gf"]
+constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
+
+def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
+
+@[reducible]
+structure SecretKey where
+  seed : ByteVec 32
+  goppa : Vector sys_t GF
+  controlbits : ByteVec cond_bytes
+  rest : ByteVec (N/8)
+
+namespace SecretKey
+
+def byteVec (sk:SecretKey) : ByteVec Mceliece348864Ref.secretKeyBytes :=
+  sk.seed
+    ++ ByteVec.ofUInt64lsb 0xffffffff
+    ++ store_gf sk.goppa
+    ++ sk.controlbits
+    ++ sk.rest
+
+protected def toString (sk:SecretKey) : String := sk.byteVec.toString
+
+--protected def toString (sk:SecretKey) : String :=
+--  sk.seed.toString
+--    ++ "ffffffff00000000"
+--    ++ toString (store_gf sk.goppa)
+--    ++ sk.controlbits.toString
+--    ++ sk.rest.toString
+
+instance : ToString SecretKey := ⟨SecretKey.toString⟩
+
+end SecretKey
+
+structure KeyPair where
+  pk : PublicKey
+  sk : SecretKey
+
+@[reducible]
+def rw : Nat :=  N/8 + 4*(1 <<< gfbits) + sys_t * 2 + 32
 
 def byteToUInt32 (v:UInt8) : UInt32 := UInt32.ofNat (v.toNat)
 
@@ -193,12 +230,6 @@ def genPolyGen (f : Vector sys_t GF) : Option (Vector sys_t GF) := Id.run do
       mat := genPolyGenUpdate mat j (gf_inv r)
   some (mat.row! sys_t)
 
-def irr_bytes : Nat := sys_t * 2
-
-
-@[extern "lean_store_gf"]
-constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
-
 -- Map used by init_pi
 structure Perm where
   value : UInt32
@@ -231,7 +262,7 @@ def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
   pure (some (Perm.idx <$> v))
 
 @[extern "lean_eval"]
-constant eval (sk : Vector sys_t GF) (x : GF) : GF
+constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 
 def pk_row_bytes : Nat := pk_ncols / 8
 
@@ -263,17 +294,18 @@ def init_pk (m : Matrix pk_nrows (N/8) UInt8) : PublicKey :=
 constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
 
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
-  let sk_input :=                      r.extractN 0 (N/8)
-  let irr ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
+  let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
   let pi  ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
   let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
-  let inv := Vector.generate N λi => gf_inv (eval irr (L.get! i))
+  let g' := g.push 1
+  let inv := Vector.generate N λi => gf_inv (eval g' (L.get! i))
   let m ← gaussian_elim (init_mat inv L)
   let pk := init_pk m
-  let sk := seed ++ ByteVec.ofUInt64lsb 0xffffffff
-                 ++ store_gf irr
-                 ++ controlBitsFromPermutation pi
-                 ++ sk_input
+  let sk := { seed := seed,
+              goppa := g,
+              controlbits := controlBitsFromPermutation pi
+              rest := r.extractN 0 (N/8)
+            }
   some ⟨pk, sk⟩
 
 def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyPair × DRBG) := do
@@ -290,10 +322,6 @@ def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyP
   match loop bytes attempts with
   | none => none
   | some p => some (p, drbg)
-
-structure EncryptionResult where
-  ss : Plaintext
-  ct : Ciphertext
 
 def gen_e_step0 (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n (Fin N)) := Id.run do
   let mut ind : Array (Fin N) := Array.mkEmpty sys_t
@@ -332,41 +360,109 @@ def gen_e_step1 (drbg:DRBG) : Option (Vector sys_t (Fin N)) × DRBG :=
     else
       (some ind, drbg)
 
+@[extern "lean_elt_to_bytevec"]
+constant eltToByteVec {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+
 @[extern "lean_crypto_gen_e_step3"]
-constant gen_e_step3b (v: @&(Vector sys_t (Fin N))) : ByteVec (N / 8)
+constant gen_e_step3 (v: @&(Vector sys_t (Fin N))) : BitVec N
 
 @[extern "lean_crypto_syndrome"]
-constant cSyndrome : @&PublicKey
-                   → @&(ByteVec (N / 8))
-                   → ByteVec synd_bytes
+constant cSyndrome (pk: @&PublicKey)
+                   (e:  @&(BitVec N))
+  : BitVec pk_nrows
+
+@[reducible]
+structure Ciphertext where
+  syndrome : BitVec pk_nrows
+  hash : ByteVec 32
+
+namespace Ciphertext
+
+protected def bytes (c:Ciphertext) : ByteVec 128 :=
+  eltToByteVec (pk_nrows/8) c.syndrome ++ c.hash
+
+protected def toString (c:Ciphertext) : String := c.bytes.toString
+
+instance : ToString Ciphertext := ⟨Ciphertext.toString⟩
+
+def mkHash (e:BitVec N) : ByteVec 32 :=
+  cryptoHash32b (#b[2].data ++ (eltToByteVec (N/8) e).data)
+
+end Ciphertext
+
+structure Plaintext where
+  e : BitVec N
+  c : Ciphertext
+
+namespace Plaintext
+
+protected def bytes (p:Plaintext) :  ByteVec 32 :=
+  cryptoHash32b (#b[1].data ++ (eltToByteVec (N/8) p.e).data ++ p.c.bytes.data)
+
+protected def toString (p:Plaintext) : String := p.bytes.toString
+
+instance : ToString Plaintext := ⟨Plaintext.toString⟩
+
+end Plaintext
+
+structure EncryptionResult where
+  ss : Plaintext
+  ct : Ciphertext
 
 def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × DRBG) := do
   match tryN gen_e_step1 drbg attempts with
   | (some ind, drbg) =>
-    let e   := gen_e_step3b ind
-    let c   := cSyndrome pk e ++ cryptoHash32b (#b[2] ++ e)
-    let key := cryptoHash32b $ #b[1] ++ e ++ c
-    some (⟨key, c⟩, drbg)
+    let e   := gen_e_step3 ind
+    let c   := { syndrome := cSyndrome pk e,
+                 hash := Ciphertext.mkHash e
+                 }
+    let plaintext := { e := e, c := c }
+    some ({ ss := plaintext, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
+@[extern "lean_support_gen"]
+constant support_gen (controlbits : @&(ByteVec cond_bytes)) : Vector N GF
+
+def synd
+    (g: @&(Vector sys_t GF))
+    (l : @&(Vector N GF))
+    (r : @&(BitVec N))
+   : Vector (2*sys_t) GF := Id.run do
+  let mut out := Vector.replicate (2*sys_t) 0
+  let f := g.push 1
+  for i in range 0 N do
+    let c : Bool := r.lsb_index i
+    let e := eval f (l.get! i)
+    let mut e_inv := gf_inv (e * e)
+    for j in range 0 (2*sys_t) do
+      if c then
+        out := out.set! j (out.get! j + e_inv)
+      e_inv := e_inv * l.get! i
+  pure out
+
+@[extern "lean_bm"]
+constant bm
+    (s: @&(Vector (2*sys_t) GF))
+   : Vector (sys_t+1) GF
+
 @[extern "lean_decrypt"]
-constant decrypt (ct : @&(ByteVec synd_bytes)) (sk : @&(ByteVec (secretKeyBytes - 40))) : ByteVec (N / 8) × UInt8
+constant decrypt
+    (images : @&(Vector N GF))
+    (s: @&(Vector (2*sys_t) GF))
+   : Nat × BitVec N
 
-
-def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Plaintext := Id.run $ do
-  let c_cipher := c.extractN 0 synd_bytes
-  let c_hash   := c.extractN synd_bytes 32
-  let (e, ret_decrypt) := decrypt c_cipher (sk.drop 40)
-  let conf := cryptoHash32b (#b[2] ++ e)
-  let ret_confirm := ByteVec.orAll (conf ^^^ c_hash)
-  let m : UInt16 := (ret_decrypt ||| ret_confirm).toUInt16
-  let m := m - 1
-  let m := (m >>> 8 : UInt16).toUInt8
+def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Option Plaintext := do
+  let g := sk.goppa
+  let l := support_gen sk.controlbits
+  let r : BitVec N := c.syndrome ++ BitVec.zero (N-pk_nrows)
+  let s := synd g l r
+  let locator := bm s
+  let images := (λi => gf_inv (eval locator i)) <$> l
+  let (w, e) := decrypt images s
   -- Generate preimage
-  let s := sk.extractN (40 + irr_bytes + cond_bytes) (N/8)
-  let preimageX : ByteVec (N/8) := ~~~m &&& s
-  let preimageY : ByteVec (N/8) := m &&& (e.extractN 0 (N/8))
-  let preimage := preimageX ||| preimageY
-  pure $ cryptoHash32b $ #b[m &&& 1] ++ preimage ++ c
+  if w = sys_t ∧ Ciphertext.mkHash e = c.hash ∧ s = synd g l e then
+    some $ { e := e, c := c }
+  else
+    none
 
 end Mceliece348864Ref

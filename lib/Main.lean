@@ -31,9 +31,12 @@ def main (args:List String): IO Unit := do
               match Mceliece348864Ref.mkCryptoKemEnc drbg 20 key.pk with
               | none => throw $ IO.userError "Encryption key generation failed."
               | some (enc, dbrg) => pure enc
-        let expected := Mceliece348864Ref.cryptoKemDec enc.ct key.sk
-        if enc.ss ≠ expected then
-          throw $ IO.userError "crypto_kem_dec returned bad 'ss' value"
+        match Mceliece348864Ref.cryptoKemDec enc.ct key.sk with
+        | none =>
+          throw $ IO.userError "crypto_kem_dec failed."
+        | some expected =>
+          if enc.ss.bytes ≠ expected.bytes then
+            throw $ IO.userError "crypto_kem_dec returned bad 'ss' value"
         fpRsp.putStrLn $ s!"count = {i}"
         fpRsp.putStrLn $ s!"seed = {seed.toHex}"
         fpRsp.putStrLn $ s!"pk = {key.pk}"
