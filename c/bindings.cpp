@@ -76,8 +76,6 @@ static lean_obj_res nat_import_from_bytes(size_t n, const unsigned char* a) {
     mpz_import(r, n, 1, 1, -1, 0, a);
 
     if (mpz_cmp_ui(r, LEAN_MAX_SMALL_NAT) <= 0) {
-        printf("UNEXPECTED %d\n", n);
-        assert(0);
         lean_obj_res o = lean_box(mpz_get_ui(r));
         mpz_clear(r);
         return o;
@@ -245,7 +243,6 @@ inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
     lean_ctor_set(r, 0, v);
     return r;
 }
-
 
 extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in_obj) {
     if (LEAN_UNLIKELY(!lean_is_scalar(size_obj))) {
@@ -594,50 +591,6 @@ static inline unsigned char same_mask(uint16_t x, uint16_t y)
     }
 }
 
-/* input: public key pk, error vector e */
-/* output: syndrome s */
-static void syndrome(unsigned char *s, const unsigned char *pk, unsigned char *e)
-{
-
-	for (int i = 0; i < SYND_BYTES; i++)
-		s[i] = 0;
-
-	for (int i = 0; i < PK_NROWS; i++) {
-    	const unsigned char *pk_ptr = pk + PK_ROW_BYTES * i;
-
-        unsigned char row[SYS_N/8];
-		for (int j = 0; j < SYS_N/8; j++)
-			row[j] = 0;
-
-		for (int j = 0; j < PK_ROW_BYTES; j++)
-			row[ SYS_N/8 - PK_ROW_BYTES + j ] = pk_ptr[j];
-
-		row[i/8] |= 1 << (i%8);
-
-    	unsigned char b = 0;
-		for (int j = 0; j < SYS_N/8; j++)
-			b ^= row[j] & e[j];
-
-		b ^= b >> 4;
-		b ^= b >> 2;
-		b ^= b >> 1;
-		b &= 1;
-
-        s[ i/8 ] |= (b << (i%8));
-	}
-}
-
-extern "C" lean_obj_res lean_crypto_syndrome(b_lean_obj_arg pk_array, b_lean_obj_arg e_obj) {
-    uint8_t* pk = lean_sarray_cptr(pk_array);
-
-	unsigned char e[SYS_N/8];
-    nat_export_to_bytes(SYS_N/8, e, e_obj);
-
-    unsigned char s[SYND_BYTES];
-	syndrome(s, pk, e);
-    return nat_import_from_bytes(SYND_BYTES, s);
-}
-
 extern "C" void bm(gf *, gf *);
 extern "C" void support_gen(gf *, const unsigned char *);
 
@@ -771,6 +724,24 @@ extern "C" lean_obj_res lean_support_gen(b_lean_obj_arg sk_obj) {
         lean_array_set_core(L_obj, i, lean_box_uint32(L[i]));
     }
     return L_obj;
+}
+
+extern "C" lean_obj_res lean_elt_from_bytevec(b_lean_obj_arg w_obj, b_lean_obj_arg r_obj, b_lean_obj_arg x_obj) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t w = lean_unbox(w_obj);
+
+    if (LEAN_UNLIKELY(!lean_is_scalar(r_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t r = lean_unbox(r_obj);
+    assert(r == 8*w);
+
+    assert(lean_sarray_size(x_obj) == w);
+    const uint8_t* x = lean_sarray_cptr(x_obj);
+
+    return nat_import_from_bytes(w, x);
 }
 
 extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
