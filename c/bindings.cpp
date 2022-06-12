@@ -320,6 +320,10 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
     return sk_obj;
 }
 
+extern "C" uint16_t lean_bitrev(uint16_t x) {
+    return bitrev(x);
+}
+
 /* input: polynomial f and field element a */
 /* return f(a) */
 static
@@ -332,72 +336,6 @@ gf my_eval(const gf *f, gf a) {
 	}
 
 	return r;
-}
-
-static
-void init_mat_row(unsigned char* matj, const gf* Lj, gf* invj) {
-    for (size_t i = 0; i < SYS_T; i++) {
-        for (size_t k = 0; k < GFBITS;  k++) {
-            unsigned char b;
-            b  = (invj[7] >> k) & 1; b <<= 1;
-            b |= (invj[6] >> k) & 1; b <<= 1;
-            b |= (invj[5] >> k) & 1; b <<= 1;
-            b |= (invj[4] >> k) & 1; b <<= 1;
-            b |= (invj[3] >> k) & 1; b <<= 1;
-            b |= (invj[2] >> k) & 1; b <<= 1;
-            b |= (invj[1] >> k) & 1; b <<= 1;
-            b |= (invj[0] >> k) & 1;
-            matj[i*GFBITS + k] = b;
-        }
-
-        for (size_t c = 0; c != 8; ++c) {
-            invj[c] = gf_mul(invj[c], Lj[c]);
-        }
-    }
-}
-
-static
-void init_mat(unsigned char** mat, const gf* L, const gf* inv) {
-    for (size_t j = 0; j < SYS_N/8; ++j) {
-
-    	unsigned char matj[PK_NROWS];
-
-        gf invj[8];
-        memcpy(invj, inv + 8*j, 8*sizeof(gf));
-
-        init_mat_row(matj, L+8*j, invj);
-
-        for (int i = 0; i != PK_NROWS; ++i) {
-            mat[i][j] = matj[i];
-        }
-	}
-}
-
-extern "C" lean_obj_res lean_init_mat(b_lean_obj_arg inv_obj, b_lean_obj_arg l_obj) {
-    assert(lean_array_size(l_obj) == SYS_N);
-    gf L[SYS_N];
-    init_gf_array(L, l_obj);
-
-    assert(lean_array_size(inv_obj) == SYS_N);
- 	gf inv[ SYS_N ];
-    init_gf_array(inv, inv_obj);
-
-	unsigned char mats[PK_NROWS][SYS_N/8];
-	unsigned char* mat[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i) {
-        mat[i] = mats[i];
-    }
-    init_mat(mat, L, inv);
-
-    lean_obj_res mat_obj = lean_alloc_array(PK_NROWS, PK_NROWS);
-    for (size_t i = 0; i != PK_NROWS; ++i) {
-        lean_array_set_core(mat_obj, i, nat_import_from_bytes(SYS_N/8, mats[i]));
-    }
-    return mat_obj;
-}
-
-extern "C" uint16_t lean_bitrev(uint16_t x) {
-    return bitrev(x);
 }
 
 extern "C"  uint16_t lean_eval(b_lean_obj_arg g_obj, uint16_t x) {
@@ -425,41 +363,8 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
     return sk_obj;
 }
 
-extern "C" void bm(gf *, gf *);
-extern "C" void support_gen(gf *, const unsigned char *);
-
 extern "C" gf bitrev(gf a);
 extern "C" void apply_benes(unsigned char * r, const unsigned char * bits, int rev);
-
-
-/* input: condition bits c */
-/* output: support s */
-void my_support_gen(gf * s, const unsigned char *c) {
-	unsigned char L[ GFBITS ][ (1 << GFBITS)/8 ];
-	for (int i = 0; i < GFBITS; i++)
-		for (int j = 0; j < (1 << GFBITS)/8; j++)
-			L[i][j] = 0;
-
-	for (int i = 0; i < (1 << GFBITS); i++)
-	{
-		gf a = bitrev((gf) i);
-
-		for (int j = 0; j < GFBITS; j++)
-			L[j][ i/8 ] |= ((a >> j) & 1) << (i%8);
-	}
-
-	for (int j = 0; j < GFBITS; j++)
-		apply_benes(L[j], c, 0);
-
-	for (int i = 0; i < SYS_N; i++) {
-		s[i] = 0;
-		for (int j = GFBITS-1; j >= 0; j--)
-		{
-			s[i] <<= 1;
-			s[i] |= (L[j][i/8] >> (i%8)) & 1;
-		}
-	}
-}
 
 #define min(a, b) ((a < b) ? a : b)
 
@@ -520,12 +425,56 @@ void my_bm(gf *out, const gf *s)
 		out[i] = C[ SYS_T-i ];
 }
 
+extern "C" lean_obj_res lean_bm(b_lean_obj_arg s_obj, b_lean_obj_arg s2_obj) {
+    assert(lean_array_size(s_obj) == 2*SYS_T);
+	gf s[2*SYS_T];
+    init_gf_array(s, s_obj);
+
+	gf locator[ SYS_T+1 ];
+	my_bm(locator, s);
+
+    lean_obj_res locator_obj = lean_alloc_array(SYS_T+1, SYS_T+1);
+    for (size_t i = 0; i != SYS_T+1; ++i) {
+        lean_array_set_core(locator_obj, i, lean_box_uint32(locator[i]));
+    }
+    return locator_obj;
+}
+
+/* input: condition bits c */
+/* output: support s */
+void my_support_gen(gf * s, const unsigned char *c) {
+	unsigned char L[ GFBITS ][ (1 << GFBITS)/8 ];
+	for (int i = 0; i < GFBITS; i++)
+		for (int j = 0; j < (1 << GFBITS)/8; j++)
+			L[i][j] = 0;
+
+	for (int i = 0; i < (1 << GFBITS); i++)
+	{
+		gf a = bitrev((gf) i);
+
+		for (int j = 0; j < GFBITS; j++)
+			L[j][ i/8 ] |= ((a >> j) & 1) << (i%8);
+	}
+
+	for (int j = 0; j < GFBITS; j++)
+		apply_benes(L[j], c, 0);
+
+	for (int i = 0; i < SYS_N; i++) {
+		s[i] = 0;
+		for (int j = GFBITS-1; j >= 0; j--)
+		{
+			s[i] <<= 1;
+			s[i] |= (L[j][i/8] >> (i%8)) & 1;
+		}
+	}
+}
+
 extern "C" lean_obj_res lean_support_gen(b_lean_obj_arg sk_obj) {
     assert(lean_sarray_size(sk_obj) == COND_BYTES);
     const uint8_t* sk = lean_sarray_cptr(sk_obj);
 
 	gf L[ SYS_N ];
-	support_gen(L, sk);
+	my_support_gen(L, sk);
 
     lean_obj_res L_obj = lean_alloc_array(SYS_N, SYS_N);
     for (size_t i = 0; i != SYS_N; ++i) {
@@ -561,19 +510,4 @@ extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg
     lean_obj_res e_obj = lean_alloc_sarray1(1, w);
     nat_export_to_bytes(w, lean_sarray_cptr(e_obj), x);
     return e_obj;
-}
-
-extern "C" lean_obj_res lean_bm(b_lean_obj_arg s_obj, b_lean_obj_arg s2_obj) {
-    assert(lean_array_size(s_obj) == 2*SYS_T);
-	gf s[2*SYS_T];
-    init_gf_array(s, s_obj);
-
-	gf locator[ SYS_T+1 ];
-	my_bm(locator, s);
-
-    lean_obj_res locator_obj = lean_alloc_array(SYS_T+1, SYS_T+1);
-    for (size_t i = 0; i != SYS_T+1; ++i) {
-        lean_array_set_core(locator_obj, i, lean_box_uint32(locator[i]));
-    }
-    return locator_obj;
 }

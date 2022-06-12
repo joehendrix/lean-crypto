@@ -1,6 +1,7 @@
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.Matrix
+import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
@@ -11,6 +12,29 @@ protected def xor (x y : Bool) : Bool := if x then not y else y
 instance : Xor Bool := ⟨Bool.xor⟩
 
 end Bool
+
+
+namespace Nat
+
+private theorem log2_terminates : ∀ n, n ≥ 2 → n / 2 < n
+  | 2, _ => by decide
+  | 3, _ => by decide
+  | n+4, _ => by
+    rw [div_eq, if_pos]
+    refine succ_lt_succ (Nat.lt_trans ?_ (lt_succ_self _))
+    exact log2_terminates (n+2) (succ_lt_succ (zero_lt_succ _))
+    exact ⟨by decide, succ_lt_succ (zero_lt_succ _)⟩
+
+def smul (add : α → α → α) (dbl : α → α) (r : α) (x : α) (n : Nat)    : α :=
+  if h : n ≥ 2 then
+    let k := n % 2
+    let r := if n%2 = 1 then add r x else r
+    smul add dbl r (dbl x) (n / 2)
+  else
+    if n = 1 then add x r else r
+decreasing_by exact log2_terminates _ ‹_›
+
+end Nat
 
 def BitVec (n:Nat) := Fin (2^n)
 
@@ -90,7 +114,6 @@ def reverse (x:BitVec n) : BitVec n := Id.run do
       r := r + 1
   pure ⟨r, sorry⟩
 
-
 protected def foldl (f: α → Bool → α) (x: BitVec n) (a : α) : α := Id.run do
   let mut r := a
   for i in range 0 n do
@@ -116,6 +139,27 @@ protected def decideEq {n:Nat} : (a b : BitVec n) → Decidable (Eq a b) :=
     | isFalse h => isFalse (ne_of_val_ne h)
 
 instance (n:Nat) : DecidableEq (BitVec n) := BitVec.decideEq
+
+-- Generate a
+protected def generate_msbb {n:Nat} (f : Fin n → Bool) : BitVec n := Id.run do
+  let mut r : Nat := 0
+
+  let m := n % 8
+  if m ≠ 0 then
+    let mut w : Nat := 0
+    for j in range 0 m do
+      let b := f ⟨j, sorry⟩
+      w := if b then 1 <<< j ||| w else w
+    r := w
+
+  for i in range 0 (n/8) do
+    let mut w : Nat := 0
+    for j in range 0 8 do
+      let b := f ⟨m+8*i+j, sorry⟩
+      w := if b then 1 <<< j ||| w else w
+    r := r <<< 8 ||| w
+
+  ⟨r, sorry⟩
 
 end BitVec
 
@@ -240,6 +284,12 @@ instance : Add GF := ⟨GF.add⟩
 instance : Mul GF := ⟨GF.mul⟩
 
 instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩ }
+
+protected def bit (x:GF) (idx:Nat) : Bool :=
+  if idx < 12 then
+    (x.val >>> UInt16.ofNat idx) &&& 1 = 1
+  else
+    false
 
 end GF
 
@@ -382,9 +432,20 @@ def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
 @[extern "lean_eval"]
 constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 
-@[extern "lean_init_mat"]
-constant init_mat (inv : @&(Vector N GF)) (L : @&(Vector N GF))
-  : Vector pk_nrows (BitVec N)
+def init_mat_row (inv : @&(Vector N GF)) (k : @&Nat) : BitVec N :=
+  BitVec.generate_msbb λi =>
+    let gf := inv.get i
+    gf.bit k
+
+def flatten [Inhabited α] (v : Vector m (Vector n α)) : Vector (m*n) α :=
+  Vector.generate (m*n) λi => (v.get! (i.val/n)).get! (i.val%n)
+
+def init_mat (inv0 : Vector N GF) (L : Vector N GF) : Vector pk_nrows (BitVec N) := Id.run do
+  flatten $
+    Vector.generate sys_t λi =>
+      let inv := Vector.generate N λj =>
+            inv0.get! j * Nat.smul (λx y => x * y) (λx => x * x) 1 (L.get! j) i
+      Vector.generate gfbits λk => init_mat_row inv k
 
 def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
   : Option (Vector pk_nrows (BitVec N)) := Id.run do
