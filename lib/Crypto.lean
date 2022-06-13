@@ -1,4 +1,5 @@
 import Crypto.Bool
+import Crypto.BitVec2
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.Exp
@@ -8,135 +9,17 @@ import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
-def BitVec (n:Nat) := Fin (2^n)
-
---structure BitVec (n:Nat) where
---  val : Nat
---  isLt : val < 2^n
-
-namespace BitVec
-
-protected def zero (n:Nat) : BitVec n := ⟨0, sorry⟩
-
-instance : Inhabited (BitVec n) := ⟨BitVec.zero n⟩
-
-protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
-  ⟨x.val <<< n ||| y.val, sorry⟩
-
-instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
-  hAppend := BitVec.append
-
-protected def and (x y : BitVec n) : BitVec n := ⟨x.val &&& y.val, sorry⟩
-protected def or  (x y : BitVec n) : BitVec n := ⟨x.val ||| y.val, sorry⟩
-protected def xor (x y : BitVec n) : BitVec n := ⟨x.val ^^^ y.val, sorry⟩
-
-instance : AndOp (BitVec n) := ⟨BitVec.and⟩
-instance : OrOp (BitVec n) := ⟨BitVec.or⟩
-instance : Xor (BitVec n) := ⟨BitVec.xor⟩
-
-def lsb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
-  (x.val &&& (1 <<< i)) ≠ 0
-
-def lsb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
-  if c then
-    x ||| ⟨1 <<< i, sorry⟩
-  else
-    x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
-
-/--
-Update index to use most-significant bytes, but least-significant bit
-ordering within bytes.
-
-This may be removed once compatibility with C is not needed.
--/
-def msbb_fix (m:Nat) (i:Nat) : Nat :=
-  let j := (m-1)-i
-  -- Reverse bit order within bytes (see if we can fix this)
-  ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
-
-def msbb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool := x.lsb_get! (msbb_fix m i)
-
-def msbb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
-  x.lsb_set! (msbb_fix m i) c
-
-protected def toBinary (x:BitVec n) : String :=
-  let l := Nat.toDigits 2 x.val
-  String.mk (List.replicate (n - l.length) '0' ++ l)
-
-protected def toHex (x:BitVec n) : String :=
-  let l := Nat.toDigits 16 x.val
-  String.mk (List.replicate (n/4 - l.length) '0' ++ l)
-
-protected def toHex2 (x:BitVec n) : String := Id.run do
-  let mut s : String := ""
-  for i in range 0 (n/8) do
-    let b := UInt8.ofNat (x.val >>> (8*i))
-    s := s ++ b.toHex
-  pure s
-instance : ToString (BitVec n) := ⟨BitVec.toHex2⟩
-
-def reverse (x:BitVec n) : BitVec n := Id.run do
-  let mut r : Nat := 0
-  for i in range 0 n do
-    r := r <<< 1
-    if x.lsb_get! i then
-      r := r + 1
-  pure ⟨r, sorry⟩
-
-protected def foldl (f: α → Bool → α) (x: BitVec n) (a : α) : α := Id.run do
-  let mut r := a
-  for i in range 0 n do
-    r := f r (x.msbb_get! i)
-  pure r
-
-protected def take_lsb (x:BitVec m) (n:Nat) : BitVec n :=
-  ⟨x.val &&& 1 <<< n - 1, sorry⟩
-
-protected def take_msb (x:BitVec m) (n:Nat) : BitVec n :=
-  ⟨x.val >>> (m-n), sorry⟩
-
-theorem eq_of_val_eq {n:Nat} : ∀ {x y : BitVec n}, Eq x.val y.val → Eq x y
-  | ⟨x,_⟩, _, rfl => rfl
-
-theorem ne_of_val_ne {n:Nat}  {i j : BitVec n} (h : Not (Eq i.val j.val)) : Not (Eq i j) :=
-  λh' => absurd (h' ▸ rfl) h
-
-protected def decideEq {n:Nat} : (a b : BitVec n) → Decidable (Eq a b) :=
-  fun ⟨i, _⟩ ⟨j, _⟩ =>
-    match decEq i j with
-    | isTrue h  => isTrue (eq_of_val_eq h)
-    | isFalse h => isFalse (ne_of_val_ne h)
-
-instance (n:Nat) : DecidableEq (BitVec n) := BitVec.decideEq
-
--- Generate a
-protected def generate_msbb {n:Nat} (f : Fin n → Bool) : BitVec n := Id.run do
-  let mut r : Nat := 0
-
-  let m := n % 8
-  if m ≠ 0 then
-    let mut w : Nat := 0
-    for j in range 0 m do
-      let b := f ⟨j, sorry⟩
-      w := if b then 1 <<< j ||| w else w
-    r := w
-
-  for i in range 0 (n/8) do
-    let mut w : Nat := 0
-    for j in range 0 8 do
-      let b := f ⟨m+8*i+j, sorry⟩
-      w := if b then 1 <<< j ||| w else w
-    r := r <<< 8 ||| w
-
-  ⟨r, sorry⟩
-
-end BitVec
-
 @[extern "lean_elt_from_bytevec"]
 constant eltFromByteVec {w:Nat} (r:Nat) (v:ByteVec w) : BitVec r
 
 @[extern "lean_elt_to_bytevec"]
-constant eltToByteVec {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+constant bitvecToByteVec_msbb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+
+@[extern "lean_nat_to_bytevec_lsb"]
+constant bitvecToByteVec_lsb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+
+def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
+  BitVec.generate_msbb (λi => v.lsb_get! i.val)
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
@@ -207,13 +90,13 @@ namespace PublicKey
 -- Create public key from row matrix
 def init (m : Vector pk_nrows (BitVec N)) : PublicKey :=
   Vector.generate pk_nrows λr =>
-    (m.get! r).take_lsb pk_ncols
+    (lsbToMsbb (m.get! r)).take_lsb pk_ncols
 
 def pk_row_bytes : Nat := pk_ncols / 8
 
 protected
 def toBytes (pk:PublicKey) : ByteVec Mceliece348864Ref.publicKeyBytes :=
-  let v := (eltToByteVec (pk_ncols / 8)) <$> pk
+  let v := (λbv => bitvecToByteVec_msbb (pk_ncols / 8) bv) <$> pk
   ByteVec.generate publicKeyBytes λi =>
     let r := i.val / pk_row_bytes
     let c := i.val % pk_row_bytes
@@ -412,7 +295,7 @@ def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
 constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 
 def init_mat_row (inv : @&(Vector N GF)) (k : @&Nat) : BitVec N :=
-  BitVec.generate_msbb λi =>
+  BitVec.generate_lsb N λi =>
     let gf := inv.get i
     gf.bit k
 
@@ -431,11 +314,11 @@ def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
   let mut mat_row := m.get! row
   for k in rangeH (row+1) pk_nrows do
     let mat_k := m.get! k
-    let mask1 := mat_row.msbb_get! row
-    let mask2 := mat_k.msbb_get! row
+    let mask1 := mat_row.lsb_get! row
+    let mask2 := mat_k.lsb_get! row
     if mask1 ≠ mask2 then
       mat_row := mat_row ^^^ mat_k
-  if not (mat_row.msbb_get! row) then
+  if not (mat_row.lsb_get! row) then
     return none
   let mut m := m
   for k in range 0 pk_nrows do
@@ -443,7 +326,7 @@ def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
       m := m.set! k mat_row
     else
       let mat_k := m.get! k
-      if mat_k.msbb_get! row then
+      if mat_k.lsb_get! row then
         m := m.set! k (mat_k ^^^ mat_row)
   pure (some m)
 
@@ -548,14 +431,14 @@ structure Ciphertext where
 namespace Ciphertext
 
 protected def bytes (c:Ciphertext) : ByteVec 128 :=
-  eltToByteVec (pk_nrows/8) c.syndrome ++ c.hash
+  bitvecToByteVec_msbb (pk_nrows/8) c.syndrome ++ c.hash
 
 protected def toString (c:Ciphertext) : String := c.bytes.toString
 
 instance : ToString Ciphertext := ⟨Ciphertext.toString⟩
 
 def mkHash (e:BitVec N) : ByteVec 32 :=
-  cryptoHash32b (#b[2].data ++ (eltToByteVec (N/8) e).data)
+  cryptoHash32b (#b[2].data ++ (bitvecToByteVec_msbb (N/8) e).data)
 
 end Ciphertext
 
@@ -566,7 +449,7 @@ structure Plaintext where
 namespace Plaintext
 
 protected def bytes (p:Plaintext) :  ByteVec 32 :=
-  cryptoHash32b (#b[1].data ++ (eltToByteVec (N/8) p.e).data ++ p.c.bytes.data)
+  cryptoHash32b (#b[1].data ++ (bitvecToByteVec_msbb (N/8) p.e).data ++ p.c.bytes.data)
 
 protected def toString (p:Plaintext) : String := p.bytes.toString
 

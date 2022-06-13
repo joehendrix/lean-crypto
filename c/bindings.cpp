@@ -112,6 +112,28 @@ static void nat_export_to_bytes(size_t n, unsigned char* a, b_lean_obj_arg x) {
     mpz_clear(xz);
 }
 
+static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x) {
+    if (n == 0)
+        return;
+    mpz_t xz;
+    if (lean_is_scalar(x)) {
+        mpz_init_set_ui(xz, lean_unbox(x));
+    } else {
+        mpz_init(xz);
+        lean_extract_mpz_value(x, xz);
+    }
+
+    size_t count;
+    mpz_export(a, &count, -1, 1, -1, 0, xz);
+    assert(count <= n);
+    if (count < n) {
+        memmove(a + (n-count), a, count);
+        memset(a, 0, n-count);
+    }
+    // Set remaining bits
+    mpz_clear(xz);
+}
+
 /*
    Use whatever AES implementation you have. This uses AES from openSSL library
       key - 256-bit AES key
@@ -504,5 +526,16 @@ extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg
 
     lean_obj_res e_obj = lean_alloc_sarray1(1, w);
     nat_export_to_bytes(w, lean_sarray_cptr(e_obj), x);
+    return e_obj;
+}
+
+extern "C" lean_obj_res lean_nat_to_bytevec_lsb(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t w = lean_unbox(w_obj);
+
+    lean_obj_res e_obj = lean_alloc_sarray1(1, w);
+    nat_export_to_bytes_lsb(w, lean_sarray_cptr(e_obj), x);
     return e_obj;
 }

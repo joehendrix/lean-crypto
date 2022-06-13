@@ -1,3 +1,5 @@
+-- This is an old BitVec implementation using byte arrays
+-- It should be completely replaced with Crypto.BitVec2
 import Crypto.ByteArray
 import Crypto.UInt8
 
