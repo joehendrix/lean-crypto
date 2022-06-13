@@ -1,40 +1,12 @@
+import Crypto.Bool
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
+import Crypto.Exp
 import Crypto.Matrix
+import Crypto.Nat
 import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
-
-namespace Bool
-
-protected def xor (x y : Bool) : Bool := if x then not y else y
-
-instance : Xor Bool := ⟨Bool.xor⟩
-
-end Bool
-
-
-namespace Nat
-
-private theorem log2_terminates : ∀ n, n ≥ 2 → n / 2 < n
-  | 2, _ => by decide
-  | 3, _ => by decide
-  | n+4, _ => by
-    rw [div_eq, if_pos]
-    refine succ_lt_succ (Nat.lt_trans ?_ (lt_succ_self _))
-    exact log2_terminates (n+2) (succ_lt_succ (zero_lt_succ _))
-    exact ⟨by decide, succ_lt_succ (zero_lt_succ _)⟩
-
-def smul (add : α → α → α) (dbl : α → α) (r : α) (x : α) (n : Nat)    : α :=
-  if h : n ≥ 2 then
-    let k := n % 2
-    let r := if n%2 = 1 then add r x else r
-    smul add dbl r (dbl x) (n / 2)
-  else
-    if n = 1 then add x r else r
-decreasing_by exact log2_terminates _ ‹_›
-
-end Nat
 
 def BitVec (n:Nat) := Fin (2^n)
 
@@ -71,15 +43,12 @@ def lsb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   else
     x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
 
-/-
-def msb_fix (m:Nat) (i:Nat) : Nat := (m-1)-i
+/--
+Update index to use most-significant bytes, but least-significant bit
+ordering within bytes.
 
-def msb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool := x.lsb_get! (msb_fix m i)
-
-def msb_set! {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
-  x.lsb_set! (msb_fix m i) c
+This may be removed once compatibility with C is not needed.
 -/
-
 def msbb_fix (m:Nat) (i:Nat) : Nat :=
   let j := (m-1)-i
   -- Reverse bit order within bytes (see if we can fix this)
@@ -286,13 +255,22 @@ instance : Xor GF := ⟨GF.xor⟩
 instance : Add GF := ⟨GF.add⟩
 instance : Mul GF := ⟨GF.mul⟩
 
-instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩ }
+instance (n:Nat) : OfNat GF n where
+  ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩
+
+instance : CommMulMonoid GF where
+  mul_assoc := sorry
+  mul_comm  := sorry
+
+  one := 1
+  mul_one := sorry
 
 protected def bit (x:GF) (idx:Nat) : Bool :=
   if idx < 12 then
     (x.val >>> UInt16.ofNat idx) &&& 1 = 1
   else
     false
+
 
 end GF
 
@@ -445,7 +423,7 @@ def init_mat (inv0 : Vector N GF) (L : Vector N GF) : Vector pk_nrows (BitVec N)
   flatten $
     Vector.generate sys_t λi =>
       let inv := Vector.generate N λj =>
-            inv0.get! j * Nat.smul (λx y => x * y) (λx => x * x) 1 (L.get! j) i
+            inv0.get! j * exp (L.get! j) i
       Vector.generate gfbits λk => init_mat_row inv k
 
 def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
@@ -610,8 +588,25 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
     some ({ ss := plaintext, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
-@[extern "lean_support_gen"]
-constant support_gen (controlbits : @&(ByteVec cond_bytes)) : Vector N GF
+@[extern "lean_apply_benes0"]
+constant apply_benes0 (l : @&(BitVec (1 <<< gfbits)))
+                      (c : @&(ByteVec cond_bytes))
+                      : BitVec (1 <<< gfbits)
+
+def support_gen (c : @&(ByteVec cond_bytes)) : Vector N GF := Id.run do
+  let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
+        Vector.generate gfbits λj =>
+          let v :=
+            BitVec.generate_msbb λ(i : Fin (1 <<< gfbits)) =>
+              let i : GF := OfNat.ofNat i.val
+              (gf_bitrev i).bit j
+          apply_benes0 v c
+  Vector.generate N λ i => Id.run do
+    let mut si : Nat := 0
+    for k in range 0 gfbits do
+      let j := gfbits-1-k
+      si := si <<< 1 ||| (if (L.get! j).msbb_get! i.val then 1 else 0)
+    pure (OfNat.ofNat si)
 
 def synd
     (g: @&(Vector sys_t GF))

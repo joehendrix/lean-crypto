@@ -16,6 +16,7 @@ extern "C" {
 #include "sk_gen.h"
 #include "uint64_sort.h"
 #include "util.h"
+#include "transpose.h"
 
 #include <openssl/conf.h>
 #include <openssl/evp.h>
@@ -368,51 +369,113 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
 }
 
 extern "C" gf bitrev(gf a);
-extern "C" void apply_benes(unsigned char * r, const unsigned char * bits, int rev);
 
 #define min(a, b) ((a < b) ? a : b)
 
-/* input: condition bits c */
-/* output: support s */
-void my_support_gen(gf * s, const unsigned char *c) {
-	unsigned char L[ GFBITS ][ (1 << GFBITS)/8 ];
-	for (int i = 0; i < GFBITS; i++)
-		for (int j = 0; j < (1 << GFBITS)/8; j++)
-			L[i][j] = 0;
+/* one layer of the benes network */
+static void layer(uint64_t * data, uint64_t * bits, int lgs) {
+	int i, j, s;
 
-	for (int i = 0; i < (1 << GFBITS); i++)
+	uint64_t d;
+
+	s = 1 << lgs;
+
+	for (i = 0; i < 64; i += s*2)
+	for (j = i; j < i+s; j++)
 	{
-		gf a = bitrev((gf) i);
 
-		for (int j = 0; j < GFBITS; j++)
-			L[j][ i/8 ] |= ((a >> j) & 1) << (i%8);
-	}
-
-	for (int j = 0; j < GFBITS; j++)
-		apply_benes(L[j], c, 0);
-
-	for (int i = 0; i < SYS_N; i++) {
-		s[i] = 0;
-		for (int j = GFBITS-1; j >= 0; j--)
-		{
-			s[i] <<= 1;
-			s[i] |= (L[j][i/8] >> (i%8)) & 1;
-		}
+		d = (data[j+0] ^ data[j+s]);
+		d &= (*bits++);
+		data[j+0] ^= d;
+		data[j+s] ^= d;
 	}
 }
 
-extern "C" lean_obj_res lean_support_gen(b_lean_obj_arg sk_obj) {
-    assert(lean_sarray_size(sk_obj) == COND_BYTES);
-    const uint8_t* sk = lean_sarray_cptr(sk_obj);
+/* input: r, sequence of bits to be permuted */
+/*        bits, condition bits of the Benes network */
+/*        rev, 0 for normal application; !0 for inverse */
+/* output: r, permuted bits */
+void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
+{
+	int i;
 
-	gf L[ SYS_N ];
-	my_support_gen(L, sk);
+	const unsigned char *cond_ptr;
+	int inc, low;
 
-    lean_obj_res L_obj = lean_alloc_array(SYS_N, SYS_N);
-    for (size_t i = 0; i != SYS_N; ++i) {
-        lean_array_set_core(L_obj, i, lean_box_uint32(L[i]));
-    }
-    return L_obj;
+	uint64_t bs[64];
+	for (i = 0; i < 64; i++) {
+		bs[i] = load8(r2 + i*8);
+	}
+
+
+	if (rev == 0)
+	{
+		inc = 256;
+		cond_ptr = bits;
+	}
+	else
+	{
+		inc = -256;
+		cond_ptr = bits + (2*GFBITS-2)*256;
+	}
+
+	transpose_64x64(bs, bs);
+
+	uint64_t cond[64];
+	for (low = 0; low <= 5; low++)
+	{
+		for (i = 0; i < 64; i++)
+            cond[i] = load4(cond_ptr + i*4);
+		transpose_64x64(cond, cond);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (low = 0; low <= 5; low++)
+	{
+		for (i = 0; i < 32; i++)
+            cond[i] = load8(cond_ptr + i*8);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+	for (low = 4; low >= 0; low--)
+	{
+		for (i = 0; i < 32; i++)
+            cond[i] = load8(cond_ptr + i*8);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (low = 5; low >= 0; low--)
+	{
+		for (i = 0; i < 64; i++)
+            cond[i] = load4(cond_ptr + i*4);
+		transpose_64x64(cond, cond);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (i = 0; i < 64; i++) {
+		store8(r2 + i*8, bs[i]);
+	}
+}
+
+extern "C" lean_obj_res lean_apply_benes0(b_lean_obj_arg r_obj, b_lean_obj_arg c_obj) {
+    assert(lean_sarray_size(c_obj) == COND_BYTES);
+    const uint8_t* c = lean_sarray_cptr(c_obj);
+
+    unsigned char r[(1 << GFBITS)/8];
+    nat_export_to_bytes((1 << GFBITS)/8, r, r_obj);
+
+	my_apply_benes(r, c, 0);
+
+    return nat_import_from_bytes((1 << GFBITS)/8, r);
 }
 
 extern "C" lean_obj_res lean_elt_from_bytevec(b_lean_obj_arg w_obj, b_lean_obj_arg r_obj, b_lean_obj_arg x_obj) {
