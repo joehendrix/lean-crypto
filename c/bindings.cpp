@@ -270,6 +270,10 @@ extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
     return gf_mul(x, y);
 }
 
+extern "C" uint16_t lean_gf_frac(uint16_t x, uint16_t y) {
+    return gf_frac(x, y);
+}
+
 extern "C" lean_obj_res lean_GF_mul(b_lean_obj_arg x_obj, b_lean_obj_arg y_obj) {
     gf x[lean_array_size(x_obj)];
     init_gf_array(x, x_obj);
@@ -367,78 +371,6 @@ extern "C" gf bitrev(gf a);
 extern "C" void apply_benes(unsigned char * r, const unsigned char * bits, int rev);
 
 #define min(a, b) ((a < b) ? a : b)
-
-/* the Berlekamp-Massey algorithm */
-/* input: s, sequence of field elements */
-/* output: out, minimal polynomial of s */
-static
-void my_bm(gf *out, const gf *s)
-{
-	//
-
-	gf B[SYS_T+1];
-	for (int i = 0; i < SYS_T+1; i++)
-		B[i] = 0;
-	B[1] = 1;
-
-	gf C[SYS_T+1];
-	for (int i = 0; i < SYS_T+1; i++)
-		C[i] = 0;
-	C[0] = 1;
-
-
-	uint16_t L = 0;
-	gf b = 1;
-
-	//
-	for (uint16_t N = 0; N < 2 * SYS_T; N++) {
-		gf d = 0;
-		for (int i = 0; i <= min(N, SYS_T); i++)
-			d ^= gf_mul(C[i], s[ N-i]);
-
-		gf mne = ((d-1)>>15)-1;
-        gf mle = N; mle -= 2*L; mle >>= 15; mle -= 1;
-		mle &= mne;
-
-    	gf T[ SYS_T+1  ];
-		for (int i = 0; i <= SYS_T; i++)
-			T[i] = C[i];
-
-        gf f = gf_frac(b, d);
-
-		for (int i = 0; i <= SYS_T; i++)
-			C[i] ^= gf_mul(f, B[i]) & mne;
-
-		L = (L & ~mle) | ((N+1-L) & mle);
-
-		for (int i = 0; i <= SYS_T; i++)
-			B[i] = (B[i] & ~mle) | (T[i] & mle);
-
-		b = (b & ~mle) | (d & mle);
-
-		for (int i = SYS_T; i >= 1; i--)
-            B[i] = B[i-1];
-		B[0] = 0;
-	}
-
-	for (int i = 0; i <= SYS_T; i++)
-		out[i] = C[ SYS_T-i ];
-}
-
-extern "C" lean_obj_res lean_bm(b_lean_obj_arg s_obj, b_lean_obj_arg s2_obj) {
-    assert(lean_array_size(s_obj) == 2*SYS_T);
-	gf s[2*SYS_T];
-    init_gf_array(s, s_obj);
-
-	gf locator[ SYS_T+1 ];
-	my_bm(locator, s);
-
-    lean_obj_res locator_obj = lean_alloc_array(SYS_T+1, SYS_T+1);
-    for (size_t i = 0; i != SYS_T+1; ++i) {
-        lean_array_set_core(locator_obj, i, lean_box_uint32(locator[i]));
-    }
-    return locator_obj;
-}
 
 /* input: condition bits c */
 /* output: support s */

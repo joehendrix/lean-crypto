@@ -276,6 +276,9 @@ protected constant add (x y : GF) : GF
 @[extern "lean_gf_mul"]
 protected constant mul (x y : GF) : GF
 
+@[extern "lean_gf_frac"]
+protected constant frac (x y : GF) : GF
+
 instance : Complement GF := ⟨GF.complement⟩
 instance : AndOp GF := ⟨GF.and⟩
 instance : OrOp GF := ⟨GF.or⟩
@@ -371,10 +374,8 @@ def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
       r := r ^^^ mat.get! i k
   pure r
 
-def genPolyGenUpdate (mat : Matrix (sys_t+1) sys_t GF)
-                         (j : Nat)
-                         (inv : GF)
-                        : Matrix (sys_t+1) sys_t GF :=
+def genPolyGenUpdate (mat : Matrix (sys_t+1) sys_t GF) (j : Nat) (inv : GF)
+    : Matrix (sys_t+1) sys_t GF :=
   Matrix.generate _ _ λr c =>
     if r ≤ j then
       0
@@ -628,10 +629,32 @@ def synd
         e_inv := e_inv * l.get! i
   pure out
 
-@[extern "lean_bm"]
-constant bm
-    (s: @&(Vector (2*sys_t) GF))
-   : Vector (sys_t+1) GF
+-- the Berlekamp-Massey algorithm
+-- input: s, sequence of field elements
+-- output: out, minimal polynomial of s
+def bm
+    (s: Vector (2*sys_t) GF)
+   : Vector (sys_t+1) GF := Id.run do
+  let mut B := Vector.generate (sys_t+1) λi => if i = 1 then 1 else 0
+  let mut C := Vector.generate (sys_t+1) λi => if i = 0 then 1 else 0
+  let mut L : Nat := 0
+  let mut b : GF := 1
+  for N in range 0 (2*sys_t) do
+    let mut d : GF := 0
+    for i in range 0 (min N sys_t + 1) do
+      d := d ^^^ (C.get! i * s.get! (N-i))
+
+    if d ≠ 0 then
+      let f := GF.frac b d
+      let T := C
+      C := Vector.generate (sys_t+1) λi => C.get! i ^^^ (f * B.get! i)
+      if N ≥ 2*L then
+        L := N+1-L
+        B := T
+        b := d
+    B := Vector.generate (sys_t+1) λi =>
+           if i = 0 then 0 else B.get! (i-1)
+  pure $ Vector.generate (sys_t+1) λi => C.get! (sys_t-i)
 
 constant decrypt
     (images : @&(Vector N GF))
