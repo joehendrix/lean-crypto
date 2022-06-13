@@ -1,31 +1,19 @@
+import Crypto.Bool
+import Crypto.BitVec2
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
+import Crypto.Exp
 import Crypto.Matrix
+import Crypto.Nat
+import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
-@[reducible]
-def BitVec (n:Nat) := Fin (2^n)
+@[extern "lean_elt_from_bytevec"]
+constant eltFromByteVec {w:Nat} (r:Nat) (v:ByteVec w) : BitVec r
 
-namespace BitVec
-
-protected def zero (n:Nat) : BitVec n := ⟨0, sorry⟩
-
-instance : Inhabited (BitVec n) := ⟨BitVec.zero n⟩
-
-protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
-  ⟨x.val <<< n ||| y.val, sorry⟩
-
-instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
-  hAppend := BitVec.append
-
-def lsb_fix (m:Nat) (i:Nat) : Nat :=
-  let j := (m-1)-i
-  -- Reverse bit order within bytes (see if we can fix this)
-  ((j >>> 3) <<< 3) ||| (0x7 - (j &&& 0x7))
-
-def lsb_index {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
-  (x.val &&& (1 <<< lsb_fix m i)) ≠ 0
+@[extern "lean_elt_to_bytevec"]
+constant bitvecToByteVec_msbb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 
 def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   let i := lsb_fix m i
@@ -34,7 +22,11 @@ def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   else
     x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
 
-end BitVec
+@[extern "lean_nat_to_bytevec_lsb"]
+constant bitvecToByteVec_lsb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+
+def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
+  BitVec.generate_msbb (λi => v.lsb_get! i.val)
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
@@ -56,8 +48,6 @@ def tryN {α:Type _ } (f:DRBG → Option α × DRBG)
     match f drbg with
     | (some ind, drbg) => (some ind, drbg)
     | (none, drbg) => tryN f drbg attempts
-
---open Kind
 
 @[reducible]
 def Seed := ByteVec 48
@@ -100,8 +90,30 @@ def pk_ncols : Nat := N - pk_nrows
 
 def publicKeyBytes : Nat := pk_nrows * (pk_ncols / 8)
 
-def PublicKey := ByteVec Mceliece348864Ref.publicKeyBytes
-  deriving ToString
+def PublicKey := Vector pk_nrows (BitVec pk_ncols)
+
+namespace PublicKey
+
+-- Create public key from row matrix
+def init (m : Vector pk_nrows (BitVec N)) : PublicKey :=
+  Vector.generate pk_nrows λr =>
+    (lsbToMsbb (m.get! r)).take_lsb pk_ncols
+
+def pk_row_bytes : Nat := pk_ncols / 8
+
+protected
+def toBytes (pk:PublicKey) : ByteVec Mceliece348864Ref.publicKeyBytes :=
+  let v := (λbv => bitvecToByteVec_msbb (pk_ncols / 8) bv) <$> pk
+  ByteVec.generate publicKeyBytes λi =>
+    let r := i.val / pk_row_bytes
+    let c := i.val % pk_row_bytes
+    (v.get! r).get! c
+
+protected def toString (pk:PublicKey) : String := pk.toBytes.toString
+
+instance : ToString PublicKey := ⟨PublicKey.toString⟩
+
+end PublicKey
 
 @[reducible]
 def GF := { x:UInt16 // x < (1<<<12) }
@@ -123,6 +135,9 @@ protected constant add (x y : GF) : GF
 @[extern "lean_gf_mul"]
 protected constant mul (x y : GF) : GF
 
+@[extern "lean_gf_frac"]
+protected constant frac (x y : GF) : GF
+
 instance : Complement GF := ⟨GF.complement⟩
 instance : AndOp GF := ⟨GF.and⟩
 instance : OrOp GF := ⟨GF.or⟩
@@ -130,7 +145,22 @@ instance : Xor GF := ⟨GF.xor⟩
 instance : Add GF := ⟨GF.add⟩
 instance : Mul GF := ⟨GF.mul⟩
 
-instance (n:Nat) : OfNat GF n := { ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩ }
+instance (n:Nat) : OfNat GF n where
+  ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩
+
+instance : CommMulMonoid GF where
+  mul_assoc := sorry
+  mul_comm  := sorry
+
+  one := 1
+  mul_one := sorry
+
+protected def bit (x:GF) (idx:Nat) : Bool :=
+  if idx < 12 then
+    (x.val >>> UInt16.ofNat idx) &&& 1 = 1
+  else
+    false
+
 
 end GF
 
@@ -207,15 +237,13 @@ constant GF_mul (x y : Vector sys_t GF) : Vector sys_t GF
 
 def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
   let mut r := mat.get! j j
-  for i in range j (sys_t + 1 - j) do
-    for k in range (j+1) (sys_t - (j+i)) do
+  for i in rangeH j (sys_t+1) do
+    for k in rangeH (j+1) sys_t do
       r := r ^^^ mat.get! i k
   pure r
 
-def genPolyGenUpdate (mat : Matrix (sys_t+1) sys_t GF)
-                         (j : Nat)
-                         (inv : GF)
-                        : Matrix (sys_t+1) sys_t GF :=
+def genPolyGenUpdate (mat : Matrix (sys_t+1) sys_t GF) (j : Nat) (inv : GF)
+    : Matrix (sys_t+1) sys_t GF :=
   Matrix.generate _ _ λr c =>
     if r ≤ j then
       0
@@ -273,31 +301,51 @@ def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
 @[extern "lean_eval"]
 constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
 
-def pk_row_bytes : Nat := pk_ncols / 8
+def init_mat_row (inv : @&(Vector N GF)) (k : @&Nat) : BitVec N :=
+  BitVec.generate_lsb N λi =>
+    let gf := inv.get i
+    gf.bit k
 
-@[extern "lean_init_mat"]
-constant init_mat (inv : @&(Vector N GF)) (L : @&(Vector N GF))
-  : Matrix pk_nrows (N/8) UInt8
+def flatten [Inhabited α] (v : Vector m (Vector n α)) : Vector (m*n) α :=
+  Vector.generate (m*n) λi => (v.get! (i.val/n)).get! (i.val%n)
 
-@[extern "lean_gaussian_elim_row"]
-constant gaussian_elim_row (m : @&(Matrix pk_nrows (N/8) UInt8)) (r: Nat)
-  : Option (Matrix pk_nrows (N/8) UInt8)
+def init_mat (inv0 : Vector N GF) (L : Vector N GF) : Vector pk_nrows (BitVec N) := Id.run do
+  flatten $
+    Vector.generate sys_t λi =>
+      let inv := Vector.generate N λj =>
+            inv0.get! j * exp (L.get! j) i
+      Vector.generate gfbits λk => init_mat_row inv k
 
-def gaussian_elim (m : @&(Matrix pk_nrows (N/8) UInt8))
-  : Option (Matrix pk_nrows (N/8) UInt8) := Id.run do
+def gaussian_elim_row (m : @&(Vector pk_nrows (BitVec N))) (row: Nat)
+  : Option (Vector pk_nrows (BitVec N)) := Id.run do
+  let mut mat_row := m.get! row
+  for k in rangeH (row+1) pk_nrows do
+    let mat_k := m.get! k
+    let mask1 := mat_row.lsb_get! row
+    let mask2 := mat_k.lsb_get! row
+    if mask1 ≠ mask2 then
+      mat_row := mat_row ^^^ mat_k
+  if not (mat_row.lsb_get! row) then
+    return none
+  let mut m := m
+  for k in range 0 pk_nrows do
+    if k = row then
+      m := m.set! k mat_row
+    else
+      let mat_k := m.get! k
+      if mat_k.lsb_get! row then
+        m := m.set! k (mat_k ^^^ mat_row)
+  pure (some m)
+
+def gaussian_elim (m : Vector pk_nrows (BitVec N))
+  : Option (Vector pk_nrows (BitVec N)) := Id.run do
   let mut m := m
   for i in range 0 pk_nrows do
     match gaussian_elim_row m i with
-    | some m' => m := m'
+    | some m1 =>
+      m := m1
     | none => return none
   pure (some m)
-
--- Create public key from row matrix
-def init_pk (m : Matrix pk_nrows (N/8) UInt8) : PublicKey :=
-  ByteVec.generate publicKeyBytes λi =>
-    let r := i.val / pk_row_bytes
-    let c := i.val % pk_row_bytes
-    m.get! r (pk_nrows/8 + c)
 
 @[extern "lean_controlbitsfrompermutation"]
 constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
@@ -307,9 +355,8 @@ def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := d
   let pi  ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
   let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
   let g' := g.push 1
-  let inv := Vector.generate N λi => gf_inv (eval g' (L.get! i))
-  let m ← gaussian_elim (init_mat inv L)
-  let pk := init_pk m
+  let inv := (λx => gf_inv (eval g' x)) <$> L
+  let pk := PublicKey.init (← gaussian_elim (init_mat inv L))
   let sk := { seed := seed,
               goppa := g,
               controlbits := controlBitsFromPermutation pi
@@ -343,7 +390,7 @@ def tryGenerateRandomErrors (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n
   pure none
 
 def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := Id.run do
-  for i in range 1 (n-1) do
+  for i in rangeH 1 n do
     for j in range 0 i do
       if lt_i : i < n then
         if lt_j : j < n then
@@ -354,7 +401,7 @@ def has_duplicate {n:Nat} {α:Type} [DecidableEq α] (v: Vector n α) : Bool := 
 def generateErrorBitmask (a: Vector sys_t (Fin N)) : BitVec N := Id.run do
   let mut e : BitVec N := BitVec.zero N
   for v in a.data do
-    e := e.lsb_set v.val true
+    e := e.msbb_set! v.val true
   pure e
 
 def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
@@ -374,14 +421,14 @@ def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
         return (some (generateErrorBitmask v), drbg)
   pure ⟨none, drbg⟩
 
-@[extern "lean_elt_to_bytevec"]
-constant eltToByteVec {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
-
-
-@[extern "lean_crypto_syndrome"]
-constant cSyndrome (pk: @&PublicKey)
-                   (e:  @&(BitVec N))
-  : BitVec pk_nrows
+def cSyndrome (pk : PublicKey) (e: BitVec N) : BitVec pk_nrows := Id.run do
+  let mut s : BitVec pk_nrows := BitVec.zero _
+  for i in range 0 pk_nrows do
+    let off := (BitVec.zero pk_nrows).msbb_set! i True
+    let row : BitVec N := off ++ pk.get! i
+    if (row &&& e).foldl Bool.xor false then
+      s := s.msbb_set! i True
+  pure s
 
 @[reducible]
 structure Ciphertext where
@@ -391,14 +438,14 @@ structure Ciphertext where
 namespace Ciphertext
 
 protected def bytes (c:Ciphertext) : ByteVec 128 :=
-  eltToByteVec (pk_nrows/8) c.syndrome ++ c.hash
+  bitvecToByteVec_msbb (pk_nrows/8) c.syndrome ++ c.hash
 
 protected def toString (c:Ciphertext) : String := c.bytes.toString
 
 instance : ToString Ciphertext := ⟨Ciphertext.toString⟩
 
 def mkHash (e:BitVec N) : ByteVec 32 :=
-  cryptoHash32b (#b[2].data ++ (eltToByteVec (N/8) e).data)
+  cryptoHash32b (#b[2].data ++ (bitvecToByteVec_msbb (N/8) e).data)
 
 end Ciphertext
 
@@ -409,7 +456,7 @@ structure Plaintext where
 namespace Plaintext
 
 protected def bytes (p:Plaintext) :  ByteVec 32 :=
-  cryptoHash32b (#b[1].data ++ (eltToByteVec (N/8) p.e).data ++ p.c.bytes.data)
+  cryptoHash32b (#b[1].data ++ (bitvecToByteVec_msbb (N/8) p.e).data ++ p.c.bytes.data)
 
 protected def toString (p:Plaintext) : String := p.bytes.toString
 
@@ -431,8 +478,25 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
     some ({ ss := plaintext, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
-@[extern "lean_support_gen"]
-constant support_gen (controlbits : @&(ByteVec cond_bytes)) : Vector N GF
+@[extern "lean_apply_benes0"]
+constant apply_benes0 (l : @&(BitVec (1 <<< gfbits)))
+                      (c : @&(ByteVec cond_bytes))
+                      : BitVec (1 <<< gfbits)
+
+def support_gen (c : @&(ByteVec cond_bytes)) : Vector N GF := Id.run do
+  let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
+        Vector.generate gfbits λj =>
+          let v :=
+            BitVec.generate_msbb λ(i : Fin (1 <<< gfbits)) =>
+              let i : GF := OfNat.ofNat i.val
+              (gf_bitrev i).bit j
+          apply_benes0 v c
+  Vector.generate N λ i => Id.run do
+    let mut si : Nat := 0
+    for k in range 0 gfbits do
+      let j := gfbits-1-k
+      si := si <<< 1 ||| (if (L.get! j).msbb_get! i.val then 1 else 0)
+    pure (OfNat.ofNat si)
 
 def synd
     (g: @&(Vector sys_t GF))
@@ -442,7 +506,7 @@ def synd
   let mut out := Vector.replicate (2*sys_t) 0
   let f := g.push 1
   for i in range 0 N do
-    if error_bitmask.lsb_index i then
+    if error_bitmask.msbb_get! i then
       let e := eval f (l.get! i)
       let mut e_inv := gf_inv (e * e)
       for j in range 0 (2*sys_t) do
@@ -450,16 +514,44 @@ def synd
         e_inv := e_inv * l.get! i
   pure out
 
-@[extern "lean_bm"]
-constant bm
-    (s: @&(Vector (2*sys_t) GF))
-   : Vector (sys_t+1) GF
+-- the Berlekamp-Massey algorithm
+-- input: s, sequence of field elements
+-- output: out, minimal polynomial of s
+def bm
+    (s: Vector (2*sys_t) GF)
+   : Vector (sys_t+1) GF := Id.run do
+  let mut B := Vector.generate (sys_t+1) λi => if i = 1 then 1 else 0
+  let mut C := Vector.generate (sys_t+1) λi => if i = 0 then 1 else 0
+  let mut L : Nat := 0
+  let mut b : GF := 1
+  for N in range 0 (2*sys_t) do
+    let mut d : GF := 0
+    for i in range 0 (min N sys_t + 1) do
+      d := d ^^^ (C.get! i * s.get! (N-i))
 
-@[extern "lean_decrypt"]
+    if d ≠ 0 then
+      let f := GF.frac b d
+      let T := C
+      C := Vector.generate (sys_t+1) λi => C.get! i ^^^ (f * B.get! i)
+      if N ≥ 2*L then
+        L := N+1-L
+        B := T
+        b := d
+    B := Vector.generate (sys_t+1) λi =>
+           if i = 0 then 0 else B.get! (i-1)
+  pure $ Vector.generate (sys_t+1) λi => C.get! (sys_t-i)
+
 constant decrypt
     (images : @&(Vector N GF))
     (s: @&(Vector (2*sys_t) GF))
-   : Nat × BitVec N
+   : Nat × BitVec N := Id.run do
+  let mut w : Nat := 0
+  let mut e : BitVec N := BitVec.zero _
+  for i in range 0 N do
+    if gf_iszero (images.get! i) &&& 1 = 1 then
+      e := e.msbb_set! i True
+      w := w + 1
+  pure (w, e)
 
 def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Option Plaintext := do
   let g := sk.goppa

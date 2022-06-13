@@ -16,6 +16,7 @@ extern "C" {
 #include "sk_gen.h"
 #include "uint64_sort.h"
 #include "util.h"
+#include "transpose.h"
 
 #include <openssl/conf.h>
 #include <openssl/evp.h>
@@ -40,6 +41,12 @@ extern "C" LEAN_EXPORT lean_obj_res open_fd_write(uint32_t fd) {
         return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("FILE_OPEN_ERROR Lean")));
     }
     return lean_io_result_mk_ok(lean::io_wrap_handle(fp));
+}
+
+static void init_gf_array(gf* s, b_lean_obj_arg obj) {
+    for (size_t i = 0; i != lean_array_size(obj); ++i) {
+        s[i] = lean_unbox_uint32(lean_array_get_core(obj, i));
+    }
 }
 
 extern "C" uint8_t lean_byte_array_decide_eq(b_lean_obj_arg x, b_lean_obj_arg y) {
@@ -76,8 +83,6 @@ static lean_obj_res nat_import_from_bytes(size_t n, const unsigned char* a) {
     mpz_import(r, n, 1, 1, -1, 0, a);
 
     if (mpz_cmp_ui(r, LEAN_MAX_SMALL_NAT) <= 0) {
-        printf("UNEXPECTED %d\n", n);
-        assert(0);
         lean_obj_res o = lean_box(mpz_get_ui(r));
         mpz_clear(r);
         return o;
@@ -98,6 +103,28 @@ static void nat_export_to_bytes(size_t n, unsigned char* a, b_lean_obj_arg x) {
 
     size_t count;
     mpz_export(a, &count, 1, 1, -1, 0, xz);
+    assert(count <= n);
+    if (count < n) {
+        memmove(a + (n-count), a, count);
+        memset(a, 0, n-count);
+    }
+    // Set remaining bits
+    mpz_clear(xz);
+}
+
+static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x) {
+    if (n == 0)
+        return;
+    mpz_t xz;
+    if (lean_is_scalar(x)) {
+        mpz_init_set_ui(xz, lean_unbox(x));
+    } else {
+        mpz_init(xz);
+        lean_extract_mpz_value(x, xz);
+    }
+
+    size_t count;
+    mpz_export(a, &count, -1, 1, -1, 0, xz);
     assert(count <= n);
     if (count < n) {
         memmove(a + (n-count), a, count);
@@ -246,7 +273,6 @@ inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
     return r;
 }
 
-
 extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in_obj) {
     if (LEAN_UNLIKELY(!lean_is_scalar(size_obj))) {
         lean_internal_panic_out_of_memory();
@@ -267,19 +293,16 @@ extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
     return gf_mul(x, y);
 }
 
+extern "C" uint16_t lean_gf_frac(uint16_t x, uint16_t y) {
+    return gf_frac(x, y);
+}
+
 extern "C" lean_obj_res lean_GF_mul(b_lean_obj_arg x_obj, b_lean_obj_arg y_obj) {
+    gf x[lean_array_size(x_obj)];
+    init_gf_array(x, x_obj);
 
-    size_t x_count = lean_array_size(x_obj);
-    gf x[x_count];
-    for (size_t i = 0; i != x_count; ++i) {
-        x[i] = (gf) lean_unbox_uint32(lean_array_get_core(x_obj, i));
-    }
-
-    size_t y_count = lean_array_size(y_obj);
-    gf y[y_count];
-    for (size_t i = 0; i != y_count; ++i) {
-        y[i] = (gf) lean_unbox_uint32(lean_array_get_core(y_obj, i));
-    }
+    gf y[lean_array_size(y_obj)];
+    init_gf_array(y, y_obj);
 
     gf r[SYS_T];
     GF_mul(r, x, y);
@@ -291,13 +314,6 @@ extern "C" lean_obj_res lean_GF_mul(b_lean_obj_arg x_obj, b_lean_obj_arg y_obj) 
     return r_obj;
 }
 
-
-static
-void gf_mul_array1(gf* out, gf s, gf* in, size_t n) {
-    for (size_t c = 0; c < n; c++) {
-        out[c] = gf_mul(s, in[c]);
-    }
-}
 
 static
 void xor_array(gf* out, gf* x, gf* y, size_t n) {
@@ -317,13 +333,9 @@ uint16_t lean_gf_inv(uint16_t x) {
 }
 
 extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
-
-    size_t irr_count = lean_array_size(irr_obj);
-    assert(irr_count == SYS_T);
-    gf irr[irr_count];
-    for (size_t i = 0; i != irr_count; ++i) {
-        irr[i] = (gf) lean_unbox_uint32(lean_array_get_core(irr_obj, i));
-    }
+    assert(lean_array_size(irr_obj) == SYS_T);
+    gf irr[SYS_T];
+    init_gf_array(irr, irr_obj);
 
     lean_obj_res sk_obj = lean_alloc_sarray1(1, 2 * SYS_T);
     uint8_t* sk = lean_sarray_cptr(sk_obj);
@@ -333,6 +345,10 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
         store_gf(sk + i*2, irr[i]);
 
     return sk_obj;
+}
+
+extern "C" uint16_t lean_bitrev(uint16_t x) {
+    return bitrev(x);
 }
 
 /* input: polynomial f and field element a */
@@ -349,216 +365,12 @@ gf my_eval(const gf *f, gf a) {
 	return r;
 }
 
-static
-int gaussian_elim_row(unsigned char** out, const unsigned char** mat, int row) {
-    int i = row / 8;
-    int j = row % 8;
-
-    unsigned char mat_row[ SYS_N/8 ];
-    for (size_t c = 0; c < SYS_N/8; c++)
-        mat_row[c] = mat[row][c];
-
-    for (size_t k = row + 1; k < PK_NROWS; k++) {
-        unsigned char mask = mat_row[i] ^ mat[k][i];
-        mask >>= j;
-        mask &= 1;
-        mask = -mask;
-
-        for (size_t c = 0; c < SYS_N/8; c++)
-            mat_row[c] ^= mat[k][c] & mask;
-    }
-
-    if ( ((mat_row[ i ] >> j) & 1) == 0 ) // return if not systematic
-    {
-        return -1;
-    }
-
-
-    for (size_t k = 0; k < PK_NROWS; k++) {
-        if (k == row) {
-            for (size_t c = 0; c < SYS_N/8; c++)
-                out[k][c] = mat_row[c];
-        } else {
-            unsigned char mask;
-            mask = mat[ k ][ i ] >> j;
-            mask &= 1;
-            mask = -mask;
-
-            for (size_t c = 0; c < SYS_N/8; c++)
-                out[k][c] = mat[k][c] ^ mat_row[c] & mask;
-        }
-    }
-    return 0;
-}
-
-extern "C" lean_obj_res lean_gaussian_elim_row(b_lean_obj_arg mat_obj, b_lean_obj_arg r_obj) {
-    const size_t n = PK_NROWS * SYS_N/8;
-    assert(lean_array_size(mat_obj) == n);
-
-	unsigned char mats[ PK_NROWS ][ SYS_N/8 ];
-    for (size_t i = 0; i != PK_NROWS; ++i) {
-        for (size_t j = 0; j != SYS_N/8; ++j) {
-            mats[i][j] = lean_unbox_uint32(lean_array_get_core(mat_obj, i * (SYS_N/8) + j));
-        }
-    }
-
-	const unsigned char* mat[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i) {
-        mat[i] = mats[i];
-    }
-
-	unsigned char outs[PK_NROWS][SYS_N/8];
-	unsigned char* out[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i)
-        out[i] = outs[i];
-
-    size_t r = lean_unbox(r_obj);
-
-	// gaussian elimination
-    if (gaussian_elim_row(out, mat, r))
-        return lean_mk_option_none();
-
-    lean_obj_res out_obj = lean_alloc_array(n, n);
-    int out_idx = 0;
-    for (int i = 0; i != PK_NROWS; ++i) {
-        for (int j = 0; j != SYS_N/8; ++j) {
-            lean_array_set_core(out_obj, out_idx++, lean_box_uint32(outs[i][j]));
-        }
-    }
-    return lean_mk_option_some(out_obj);
-}
-
-static
-int gaussian_elim(unsigned char** mat) {
-	unsigned char outs[PK_NROWS][SYS_N/8];
-	unsigned char* out[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i)
-        out[i] = outs[i];
-
-	const unsigned char** matr = const_cast<const unsigned char**>(mat);
-
-	for (size_t r = 0; r < PK_NROWS; ++r) {
-        if (gaussian_elim_row(out, matr, r))
-            return -1;
-    	for (size_t i = 0; i < PK_NROWS; ++i)
-            memcpy(mat[i], out[i], SYS_N/8);
-    }
-    return 0;
-}
-
-
-static
-void init_mat_row(unsigned char* matj, const gf* Lj, gf* invj) {
-    for (size_t i = 0; i < SYS_T; i++) {
-        for (size_t k = 0; k < GFBITS;  k++) {
-            unsigned char b;
-            b  = (invj[7] >> k) & 1; b <<= 1;
-            b |= (invj[6] >> k) & 1; b <<= 1;
-            b |= (invj[5] >> k) & 1; b <<= 1;
-            b |= (invj[4] >> k) & 1; b <<= 1;
-            b |= (invj[3] >> k) & 1; b <<= 1;
-            b |= (invj[2] >> k) & 1; b <<= 1;
-            b |= (invj[1] >> k) & 1; b <<= 1;
-            b |= (invj[0] >> k) & 1;
-            matj[i*GFBITS + k] = b;
-        }
-
-        for (size_t c = 0; c != 8; ++c) {
-            invj[c] = gf_mul(invj[c], Lj[c]);
-        }
-    }
-}
-
-static
-void init_mat(unsigned char** mat, const gf* L, const gf* inv) {
-    for (size_t j = 0; j < SYS_N/8; ++j) {
-
-    	unsigned char matj[PK_NROWS];
-
-        gf invj[8];
-        memcpy(invj, inv + 8*j, 8*sizeof(gf));
-
-        init_mat_row(matj, L+8*j, invj);
-
-        for (int i = 0; i != PK_NROWS; ++i) {
-            mat[i][j] = matj[i];
-        }
-	}
-}
-
-extern "C" lean_obj_res lean_init_mat(b_lean_obj_arg inv_obj, b_lean_obj_arg l_obj) {
-    assert(lean_array_size(l_obj) == SYS_N);
-    gf L[SYS_N];
-    for (size_t i = 0; i != SYS_N; ++i) {
-        L[i] = lean_unbox_uint32(lean_array_get_core(l_obj, i));
-    }
-
-	gf inv[ SYS_N ];
-    for (size_t i = 0; i != SYS_N; ++i) {
-        inv[i] = lean_unbox_uint32(lean_array_get_core(inv_obj, i));
-    }
-
-	unsigned char mats[ PK_NROWS ][ SYS_N/8 ];
-	unsigned char* mat[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i) {
-        mat[i] = mats[i];
-    }
-    init_mat(mat, L, inv);
-
-    lean_obj_res mat_obj = lean_alloc_array(PK_NROWS * SYS_N/8, PK_NROWS * SYS_N/8);
-    int r = 0;
-    for (int i = 0; i != PK_NROWS; ++i) {
-        for (int j = 0; j != SYS_N/8; ++j) {
-            lean_array_set_core(mat_obj, r++, lean_box_uint32(mats[i][j]));
-        }
-    }
-    return mat_obj;
-}
-
-extern "C" uint16_t lean_bitrev(uint16_t x) {
-    return bitrev(x);
-}
-
 extern "C"  uint16_t lean_eval(b_lean_obj_arg g_obj, uint16_t x) {
 	gf g[ SYS_T+1 ]; // Goppa polynomial
     for (size_t i = 0; i != SYS_T+1; ++i) {
         g[i] = lean_unbox_uint32(lean_array_get_core(g_obj, i));
     }
     return my_eval(g, x);
-}
-
-extern "C" lean_obj_res lean_pk_gen3(b_lean_obj_arg inv_obj, b_lean_obj_arg l_obj) {
-    assert(lean_array_size(l_obj) == SYS_N);
-    gf L[SYS_N];
-    for (size_t i = 0; i != SYS_N; ++i) {
-        L[i] = lean_unbox_uint32(lean_array_get_core(l_obj, i));
-    }
-
-	gf inv[ SYS_N ];
-    for (size_t i = 0; i != SYS_N; ++i) {
-        inv[i] = lean_unbox_uint32(lean_array_get_core(inv_obj, i));
-    }
-
-	unsigned char mats[ PK_NROWS ][ SYS_N/8 ];
-
-	unsigned char* mat[PK_NROWS];
-    for (size_t i = 0; i < PK_NROWS; ++i) {
-        mat[i] = mats[i];
-    }
-
-    init_mat(mat, L, inv);
-	// gaussian elimination
-    if (gaussian_elim(mat))
-        return lean_mk_option_none();
-
-    lean_obj_res mat_obj = lean_alloc_array(PK_NROWS * SYS_N/8, PK_NROWS * SYS_N/8);
-    int r = 0;
-    for (int i = 0; i != PK_NROWS; ++i) {
-        for (int j = 0; j != SYS_N/8; ++j) {
-            lean_array_set_core(mat_obj, r++, lean_box_uint32(mats[i][j]));
-        }
-    }
-    return lean_mk_option_some(mat_obj);
 }
 
 extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
@@ -578,199 +390,132 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
     return sk_obj;
 }
 
-static inline unsigned char same_mask_orig(uint16_t x, uint16_t y)
-{
-	uint32_t mask = (x ^ y) - 1;
-	return (-(mask >> 31)) & 0xFF;
-}
-
-
-static inline unsigned char same_mask(uint16_t x, uint16_t y)
-{
-    if (x == y) {
-    	return 0xFF;
-    } else {
-        return 0;
-    }
-}
-
-/* input: public key pk, error vector e */
-/* output: syndrome s */
-static void syndrome(unsigned char *s, const unsigned char *pk, unsigned char *e)
-{
-
-	for (int i = 0; i < SYND_BYTES; i++)
-		s[i] = 0;
-
-	for (int i = 0; i < PK_NROWS; i++) {
-    	const unsigned char *pk_ptr = pk + PK_ROW_BYTES * i;
-
-        unsigned char row[SYS_N/8];
-		for (int j = 0; j < SYS_N/8; j++)
-			row[j] = 0;
-
-		for (int j = 0; j < PK_ROW_BYTES; j++)
-			row[ SYS_N/8 - PK_ROW_BYTES + j ] = pk_ptr[j];
-
-		row[i/8] |= 1 << (i%8);
-
-    	unsigned char b = 0;
-		for (int j = 0; j < SYS_N/8; j++)
-			b ^= row[j] & e[j];
-
-		b ^= b >> 4;
-		b ^= b >> 2;
-		b ^= b >> 1;
-		b &= 1;
-
-        s[ i/8 ] |= (b << (i%8));
-	}
-}
-
-extern "C" lean_obj_res lean_crypto_syndrome(b_lean_obj_arg pk_array, b_lean_obj_arg e_obj) {
-    uint8_t* pk = lean_sarray_cptr(pk_array);
-
-	unsigned char e[SYS_N/8];
-    nat_export_to_bytes(SYS_N/8, e, e_obj);
-
-    unsigned char s[SYND_BYTES];
-	syndrome(s, pk, e);
-    return nat_import_from_bytes(SYND_BYTES, s);
-}
-
-extern "C" void bm(gf *, gf *);
-extern "C" void support_gen(gf *, const unsigned char *);
-
 extern "C" gf bitrev(gf a);
-extern "C" void apply_benes(unsigned char * r, const unsigned char * bits, int rev);
-
-
-/* input: condition bits c */
-/* output: support s */
-void my_support_gen(gf * s, const unsigned char *c) {
-	unsigned char L[ GFBITS ][ (1 << GFBITS)/8 ];
-	for (int i = 0; i < GFBITS; i++)
-		for (int j = 0; j < (1 << GFBITS)/8; j++)
-			L[i][j] = 0;
-
-	for (int i = 0; i < (1 << GFBITS); i++)
-	{
-		gf a = bitrev((gf) i);
-
-		for (int j = 0; j < GFBITS; j++)
-			L[j][ i/8 ] |= ((a >> j) & 1) << (i%8);
-	}
-
-	for (int j = 0; j < GFBITS; j++)
-		apply_benes(L[j], c, 0);
-
-	for (int i = 0; i < SYS_N; i++) {
-		s[i] = 0;
-		for (int j = GFBITS-1; j >= 0; j--)
-		{
-			s[i] <<= 1;
-			s[i] |= (L[j][i/8] >> (i%8)) & 1;
-		}
-	}
-}
 
 #define min(a, b) ((a < b) ? a : b)
 
-/* the Berlekamp-Massey algorithm */
-/* input: s, sequence of field elements */
-/* output: out, minimal polynomial of s */
-static
-void my_bm(gf *out, const gf *s)
-{
-	//
+/* one layer of the benes network */
+static void layer(uint64_t * data, uint64_t * bits, int lgs) {
+	int i, j, s;
 
-	gf B[SYS_T+1];
-	for (int i = 0; i < SYS_T+1; i++)
-		B[i] = 0;
-	B[1] = 1;
+	uint64_t d;
 
-	gf C[SYS_T+1];
-	for (int i = 0; i < SYS_T+1; i++)
-		C[i] = 0;
-	C[0] = 1;
+	s = 1 << lgs;
 
+	for (i = 0; i < 64; i += s*2)
+	for (j = i; j < i+s; j++)
+	{
 
-	uint16_t L = 0;
-	gf b = 1;
-
-	//
-	for (uint16_t N = 0; N < 2 * SYS_T; N++) {
-		gf d = 0;
-		for (int i = 0; i <= min(N, SYS_T); i++)
-			d ^= gf_mul(C[i], s[ N-i]);
-
-		gf mne = ((d-1)>>15)-1;
-        gf mle = N; mle -= 2*L; mle >>= 15; mle -= 1;
-		mle &= mne;
-
-    	gf T[ SYS_T+1  ];
-		for (int i = 0; i <= SYS_T; i++)
-			T[i] = C[i];
-
-        gf f = gf_frac(b, d);
-
-		for (int i = 0; i <= SYS_T; i++)
-			C[i] ^= gf_mul(f, B[i]) & mne;
-
-		L = (L & ~mle) | ((N+1-L) & mle);
-
-		for (int i = 0; i <= SYS_T; i++)
-			B[i] = (B[i] & ~mle) | (T[i] & mle);
-
-		b = (b & ~mle) | (d & mle);
-
-		for (int i = SYS_T; i >= 1; i--)
-            B[i] = B[i-1];
-		B[0] = 0;
+		d = (data[j+0] ^ data[j+s]);
+		d &= (*bits++);
+		data[j+0] ^= d;
+		data[j+s] ^= d;
 	}
-
-	for (int i = 0; i <= SYS_T; i++)
-		out[i] = C[ SYS_T-i ];
 }
 
-/* Niederreiter decryption with the Berlekamp decoder */
-// intput: g, goppy poly
-//         sk, secret key
-//         c, ciphertext
-// output: e, error vector
-// return: 0 for success; 1 for failure
-static int my_decrypt(unsigned char *e,
-                      gf* images,
-                      const gf* s)
+/* input: r, sequence of bits to be permuted */
+/*        bits, condition bits of the Benes network */
+/*        rev, 0 for normal application; !0 for inverse */
+/* output: r, permuted bits */
+void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
 {
-	//
+	int i;
 
-	for (int i = 0; i < SYS_N/8; i++)
-		e[i] = 0;
+	const unsigned char *cond_ptr;
+	int inc, low;
 
-	int w = 0;
-	for (int i = 0; i < SYS_N; i++) {
-	    gf t = gf_iszero(images[i]) & 1;
-
-		e[ i/8 ] |= t << (i%8);
-		w += t;
+	uint64_t bs[64];
+	for (i = 0; i < 64; i++) {
+		bs[i] = load8(r2 + i*8);
 	}
 
-    return w;
+
+	if (rev == 0)
+	{
+		inc = 256;
+		cond_ptr = bits;
+	}
+	else
+	{
+		inc = -256;
+		cond_ptr = bits + (2*GFBITS-2)*256;
+	}
+
+	transpose_64x64(bs, bs);
+
+	uint64_t cond[64];
+	for (low = 0; low <= 5; low++)
+	{
+		for (i = 0; i < 64; i++)
+            cond[i] = load4(cond_ptr + i*4);
+		transpose_64x64(cond, cond);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (low = 0; low <= 5; low++)
+	{
+		for (i = 0; i < 32; i++)
+            cond[i] = load8(cond_ptr + i*8);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+	for (low = 4; low >= 0; low--)
+	{
+		for (i = 0; i < 32; i++)
+            cond[i] = load8(cond_ptr + i*8);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (low = 5; low >= 0; low--)
+	{
+		for (i = 0; i < 64; i++)
+            cond[i] = load4(cond_ptr + i*4);
+		transpose_64x64(cond, cond);
+		layer(bs, cond, low);
+		cond_ptr += inc;
+	}
+
+	transpose_64x64(bs, bs);
+
+	for (i = 0; i < 64; i++) {
+		store8(r2 + i*8, bs[i]);
+	}
 }
 
-extern "C" lean_obj_res lean_support_gen(b_lean_obj_arg sk_obj) {
-    assert(lean_sarray_size(sk_obj) == COND_BYTES);
-    const uint8_t* sk = lean_sarray_cptr(sk_obj);
+extern "C" lean_obj_res lean_apply_benes0(b_lean_obj_arg r_obj, b_lean_obj_arg c_obj) {
+    assert(lean_sarray_size(c_obj) == COND_BYTES);
+    const uint8_t* c = lean_sarray_cptr(c_obj);
 
-	gf L[ SYS_N ];
-	support_gen(L, sk);
+    unsigned char r[(1 << GFBITS)/8];
+    nat_export_to_bytes((1 << GFBITS)/8, r, r_obj);
 
-    lean_obj_res L_obj = lean_alloc_array(SYS_N, SYS_N);
-    for (size_t i = 0; i != SYS_N; ++i) {
-        lean_array_set_core(L_obj, i, lean_box_uint32(L[i]));
+	my_apply_benes(r, c, 0);
+
+    return nat_import_from_bytes((1 << GFBITS)/8, r);
+}
+
+extern "C" lean_obj_res lean_elt_from_bytevec(b_lean_obj_arg w_obj, b_lean_obj_arg r_obj, b_lean_obj_arg x_obj) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
+        lean_internal_panic_out_of_memory();
     }
-    return L_obj;
+    size_t w = lean_unbox(w_obj);
+
+    if (LEAN_UNLIKELY(!lean_is_scalar(r_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t r = lean_unbox(r_obj);
+    assert(r == 8*w);
+
+    assert(lean_sarray_size(x_obj) == w);
+    const uint8_t* x = lean_sarray_cptr(x_obj);
+
+    return nat_import_from_bytes(w, x);
 }
 
 extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
@@ -784,42 +529,13 @@ extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg
     return e_obj;
 }
 
-static void init_gf_array(gf* s, b_lean_obj_arg obj) {
-    for (size_t i = 0; i != lean_array_size(obj); ++i) {
-        s[i] = lean_unbox_uint32(lean_array_get_core(obj, i));
+extern "C" lean_obj_res lean_nat_to_bytevec_lsb(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
+    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
+        lean_internal_panic_out_of_memory();
     }
-}
+    size_t w = lean_unbox(w_obj);
 
-extern "C" lean_obj_res lean_bm(b_lean_obj_arg s_obj, b_lean_obj_arg s2_obj) {
-    assert(lean_array_size(s_obj) == 2*SYS_T);
-	gf s[2*SYS_T];
-    init_gf_array(s, s_obj);
-
-	gf locator[ SYS_T+1 ];
-	my_bm(locator, s);
-
-    lean_obj_res locator_obj = lean_alloc_array(SYS_T+1, SYS_T+1);
-    for (size_t i = 0; i != SYS_T+1; ++i) {
-        lean_array_set_core(locator_obj, i, lean_box_uint32(locator[i]));
-    }
-    return locator_obj;
-}
-
-extern "C" lean_obj_res lean_decrypt(b_lean_obj_arg images_obj, b_lean_obj_arg s_obj) {
-    assert(lean_array_size(images_obj) == SYS_N);
-	gf images[SYS_N];
-    for (size_t i = 0; i != SYS_N; ++i) {
-        images[i] = lean_unbox_uint32(lean_array_get_core(images_obj, i));
-    }
-
-   assert(lean_array_size(s_obj) == 2*SYS_T);
-	gf s[2*SYS_T];
-    for (size_t i = 0; i != 2*SYS_T; ++i) {
-        s[i] = lean_unbox_uint32(lean_array_get_core(s_obj, i));
-    }
-
-
-    uint8_t e[SYS_N/8];
-    int w = my_decrypt(e, images, s);
-    return lean_mk_pair(lean_box(w), nat_import_from_bytes(SYS_N/8, e));
+    lean_obj_res e_obj = lean_alloc_sarray1(1, w);
+    nat_export_to_bytes_lsb(w, lean_sarray_cptr(e_obj), x);
+    return e_obj;
 }
