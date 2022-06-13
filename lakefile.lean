@@ -20,10 +20,10 @@ def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
     compileO oFile srcFile
       #["-O3",
         "-DKATNUM=10",
-       includeFlag (pkgDir / cDir / "openssl" / "include"),
-       includeFlag (pkgDir / cDir / "keccak" / "include"),
-       includeFlag (pkgDir / cDir / "mceliece348864"),
-       includeFlag (← getLeanIncludeDir)]
+        includeFlag (pkgDir / cDir / "openssl" / "include"),
+        includeFlag (pkgDir / cDir / "keccak" / "include"),
+        includeFlag (pkgDir / cDir / "mceliece348864"),
+        includeFlag (← getLeanIncludeDir)]
       "c++"
 
 def mcelieceFiles : Array FilePath :=
@@ -43,10 +43,10 @@ def mcelieceTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
        includeFlag (pkgDir / cDir / "openssl" / "include")
        ]
 
-def libmceliece348864Target (pkgDir : FilePath) : FileTarget :=
-  let libFile := pkgDir / buildDir / cDir / "libmceliece348864.a"
-  let dependencies := mcelieceFiles.map (mcelieceTarget pkgDir)
-  staticLibTarget libFile (dependencies ++ [bindingsTarget pkgDir])
+extern_lib libmceliece348864 :=
+  let libFile := __dir__ / buildDir / cDir / "libmceliece348864.a"
+  let dependencies := mcelieceFiles.map (mcelieceTarget __dir__)
+  staticLibTarget libFile (dependencies ++ [bindingsTarget __dir__])
 
 def keccakFiles : Array FilePath :=
   let base : FilePath := "keccak"
@@ -64,9 +64,9 @@ def keccakTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
   let incPath := pkgDir / cDir / "keccak" / "include" / "libkeccak.a.headers"
   ffiOTarget pkgDir src "cc" [] #["-O3", includeFlag incPath, includeFlag commonIncPath ]
 
-def libkeccakTarget (pkgDir : FilePath) : FileTarget :=
-  let libFile := pkgDir / buildDir / cDir / "libkeccak.a"
-  let dependencies := keccakFiles.map (keccakTarget pkgDir)
+extern_lib libkeccak :=
+  let libFile := __dir__ / buildDir / cDir / "libkeccak.a"
+  let dependencies := keccakFiles.map (keccakTarget __dir__)
   staticLibTarget libFile dependencies
 
 --"-arch x86_64",
@@ -449,18 +449,19 @@ def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
      opensslTarget pkgDir $ base / "crypto" / "x509v3" / "v3_utl.c"
    ]
 
-def libcryptoTarget (pkgDir : FilePath) : FileTarget :=
-  let libFile := pkgDir / buildDir / cDir / "libcrypto.a"
-  let dependencies := opensslTargets pkgDir
+extern_lib libcrypto :=
+  let libFile := __dir__ / buildDir / cDir / "libcrypto.a"
+  let dependencies := opensslTargets __dir__
   staticLibTarget libFile dependencies
 
-package crypto (pkgDir) (args) {
+package crypto {
   -- customize layout
   srcDir := "lib"
   libRoots := #[`Crypto]
   moreLeancArgs := #["-O3"]
-  -- specify the lib as an additional target
-  moreLibTargets := #[libmceliece348864Target pkgDir, libkeccakTarget pkgDir, libcryptoTarget pkgDir]
+}
+
+lean_lib crypto {
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]
   -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
 }

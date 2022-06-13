@@ -27,7 +27,7 @@ def lsb_fix (m:Nat) (i:Nat) : Nat :=
 def lsb_index {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
   (x.val &&& (1 <<< lsb_fix m i)) ≠ 0
 
-def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m := do
+def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
   let i := lsb_fix m i
   if c then
     x ||| ⟨1 <<< i, sorry⟩
