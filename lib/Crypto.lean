@@ -183,10 +183,16 @@ def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 structure SecretKey where
   seed : ByteVec 32
   goppa : Vector sys_t GF
-  controlbits : ByteVec cond_bytes
+  permutation : Vector (1 <<< gfbits) GF
   rest : ByteVec (N/8)
 
 namespace SecretKey
+
+@[extern "lean_controlbitsfrompermutation"]
+constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
+
+def controlbits (sk:SecretKey) : ByteVec cond_bytes :=
+  controlBitsFromPermutation sk.permutation
 
 def byteVec (sk:SecretKey) : ByteVec Mceliece348864Ref.secretKeyBytes :=
   sk.seed
@@ -196,13 +202,6 @@ def byteVec (sk:SecretKey) : ByteVec Mceliece348864Ref.secretKeyBytes :=
     ++ sk.rest
 
 protected def toString (sk:SecretKey) : String := sk.byteVec.toString
-
---protected def toString (sk:SecretKey) : String :=
---  sk.seed.toString
---    ++ "ffffffff00000000"
---    ++ toString (store_gf sk.goppa)
---    ++ sk.controlbits.toString
---    ++ sk.rest.toString
 
 instance : ToString SecretKey := ⟨SecretKey.toString⟩
 
@@ -340,25 +339,25 @@ def gaussian_elim (m : Vector pk_nrows (BitVec N))
     | none => return none
   pure (some m)
 
-@[extern "lean_controlbitsfrompermutation"]
-constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
-
-def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
-  let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
-  let pi  ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
+def mkPublicKey (g : Vector sys_t GF) (pi: Vector (1 <<< gfbits) GF) : Option PublicKey := do
   let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
   let g' := g.push 1
   let inv := (λx => gf_inv (eval g' x)) <$> L
-  let pk := PublicKey.init (← gaussian_elim (init_mat inv L))
+  PublicKey.init <$> gaussian_elim (init_mat inv L)
+
+def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
+  let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
+  let pi ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
+  let pk ← mkPublicKey g pi
   let sk := { seed := seed,
               goppa := g,
-              controlbits := controlBitsFromPermutation pi
+              permutation := pi
               rest := r.extractN 0 (N/8)
             }
-  some ⟨pk, sk⟩
+  some { pk := pk, sk := sk }
 
 def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyPair × DRBG) := do
-  let rec loop : ∀(seed: ByteVec 32) (attempts:Nat), Option KeyPair
+  let rec loop : ByteVec 32 → Nat → Option KeyPair
       | _, 0 => none
       | seed, Nat.succ n => do
         let r := shake rw (#v[64] ++ seed).data
@@ -458,8 +457,10 @@ instance : ToString Plaintext := ⟨Plaintext.toString⟩
 end Plaintext
 
 structure EncryptionResult where
-  ss : Plaintext
+  e : BitVec N
   ct : Ciphertext
+
+def EncryptionResult.ss (r:EncryptionResult) : Plaintext := { e := r.e, c := r.ct }
 
 def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × DRBG) := do
   match tryN tryGenerateErrors drbg attempts with
@@ -467,8 +468,7 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
     let c   := { syndrome := cSyndrome pk e,
                  hash := Ciphertext.mkHash e
                 }
-    let plaintext := { e := e, c := c }
-    some ({ ss := plaintext, ct := c }, drbg)
+    some ({ e := e, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
 @[extern "lean_apply_benes0"]
@@ -546,7 +546,7 @@ constant decrypt
       w := w + 1
   pure (w, e)
 
-def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Option Plaintext := do
+def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
   let g := sk.goppa
   let l := support_gen sk.controlbits
   let r : BitVec N := c.syndrome ++ BitVec.zero (N-pk_nrows)
@@ -556,8 +556,26 @@ def cryptoKemDec (c : @&Ciphertext) (sk : @&SecretKey) : Option Plaintext := do
   let (w, e) := decrypt images s
   -- Generate preimage
   if w = sys_t ∧ Ciphertext.mkHash e = c.hash ∧ s = synd g l e then
-    some $ { e := e, c := c }
+    some e
   else
     none
+
+-- This is the basic correctness theorem that if we
+-- make a public key from Goppa polynomial and permutation
+-- and use that to generate an encryption key result, then
+-- we can decrypt it.
+theorem decryptEncrypt (drbg drbg' : DRBG)
+               (attempts : Nat)
+               (sk: SecretKey)
+               (pk : PublicKey)
+               (r:EncryptionResult) :
+    mkPublicKey sk.goppa sk.permutation = some pk
+    → mkCryptoKemEnc drbg attempts pk = some (r, drbg')
+    → cryptoKemDec1 r.ct sk = some r.e := by
+  admit
+
+def cryptoKemDec (c : Ciphertext) (sk : SecretKey) : Option Plaintext := do
+  let e ← cryptoKemDec1 c sk
+  some $ { e := e, c := c }
 
 end Mceliece348864Ref
