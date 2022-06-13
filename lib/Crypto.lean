@@ -15,13 +15,6 @@ constant eltFromByteVec {w:Nat} (r:Nat) (v:ByteVec w) : BitVec r
 @[extern "lean_elt_to_bytevec"]
 constant bitvecToByteVec_msbb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 
-def lsb_set {m:Nat} (x:BitVec m) (i:Nat) (c:Bool) : BitVec m :=
-  let i := lsb_fix m i
-  if c then
-    x ||| ⟨1 <<< i, sorry⟩
-  else
-    x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
-
 @[extern "lean_nat_to_bytevec_lsb"]
 constant bitvecToByteVec_lsb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 
