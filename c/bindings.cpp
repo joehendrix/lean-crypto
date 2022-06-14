@@ -297,34 +297,6 @@ extern "C" uint16_t lean_gf_frac(uint16_t x, uint16_t y) {
     return gf_frac(x, y);
 }
 
-extern "C" lean_obj_res lean_GF_mul(b_lean_obj_arg x_obj, b_lean_obj_arg y_obj) {
-    gf x[lean_array_size(x_obj)];
-    init_gf_array(x, x_obj);
-
-    gf y[lean_array_size(y_obj)];
-    init_gf_array(y, y_obj);
-
-    gf r[SYS_T];
-    GF_mul(r, x, y);
-
-    lean_obj_res r_obj = lean_alloc_array(SYS_T, SYS_T);
-    for (size_t i = 0; i != SYS_T; ++i) {
-        lean_array_set_core(r_obj, i, lean_box_uint32(r[i]));
-    }
-    return r_obj;
-}
-
-
-static
-void xor_array(gf* out, gf* x, gf* y, size_t n) {
-    for (size_t c = 0; c < n; c++) {
-        out[c] = x[c] ^ y[c];
-    }
-}
-
-extern "C" uint16_t lean_gf_iszero(uint16_t x) {
-    return gf_iszero(x);
-}
 
 extern "C"
 uint16_t lean_gf_inv(uint16_t x) {

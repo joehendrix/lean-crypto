@@ -25,8 +25,16 @@ def get {n:Nat} {α:Type _} (v:Vector n α) (i: Fin n) : α :=
         exact i.isLt
   v.data.get ⟨i.val, p⟩
 
-def set! {n:Nat} {α:Type _} [Inhabited α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
+def set! {n:Nat} {α:Type _} (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
   { data := v.data.set! i e, size_proof := sorry }
+
+def add! {n:Nat} {α:Type _} [Add α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
+  let h : Inhabited α := ⟨e⟩
+  { data := v.data.set! i (v.data.get! i + e), size_proof := sorry }
+
+def sub! {n:Nat} {α:Type _} [Sub α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
+  let h : Inhabited α := ⟨e⟩
+  { data := v.data.set! i (v.data.get! i - e), size_proof := sorry }
 
 protected
 def replicate {α : Type _} (n:Nat) (d:α): Vector n α  := Vector.generate n (λi => d)

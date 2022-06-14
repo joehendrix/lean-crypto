@@ -30,7 +30,7 @@ def main (args:List String): IO Unit := do
         let enc ←
               match Mceliece348864Ref.mkCryptoKemEnc drbg 20 key.pk with
               | none => throw $ IO.userError "Encryption key generation failed."
-              | some (enc, dbrg) => pure enc
+              | some (enc, _drbg) => pure enc
         match Mceliece348864Ref.cryptoKemDec enc.ct key.sk with
         | none =>
           throw $ IO.userError "crypto_kem_dec failed."

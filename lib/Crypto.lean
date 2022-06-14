@@ -117,13 +117,7 @@ namespace GF
 
 instance : Inhabited GF := ⟨⟨0, sorry⟩⟩
 
-protected def complement (x:GF) : GF := ⟨~~~x.val, sorry⟩
-protected def and (x y:GF) : GF := ⟨x.val &&& y.val, sorry⟩
-protected def or  (x y:GF) : GF := ⟨x.val ||| y.val, sorry⟩
 protected def xor  (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
-
-@[extern "lean_gf_add"]
-protected constant add (x y : GF) : GF
 
 @[extern "lean_gf_mul"]
 protected constant mul (x y : GF) : GF
@@ -131,11 +125,9 @@ protected constant mul (x y : GF) : GF
 @[extern "lean_gf_frac"]
 protected constant frac (x y : GF) : GF
 
-instance : Complement GF := ⟨GF.complement⟩
-instance : AndOp GF := ⟨GF.and⟩
-instance : OrOp GF := ⟨GF.or⟩
 instance : Xor GF := ⟨GF.xor⟩
-instance : Add GF := ⟨GF.add⟩
+instance : Add GF := ⟨GF.xor⟩
+instance : Sub GF := ⟨GF.xor⟩
 instance : Mul GF := ⟨GF.mul⟩
 
 instance (n:Nat) : OfNat GF n where
@@ -144,8 +136,6 @@ instance (n:Nat) : OfNat GF n where
 instance : CommMulMonoid GF where
   mul_assoc := sorry
   mul_comm  := sorry
-
-  one := 1
   mul_one := sorry
 
 protected def bit (x:GF) (idx:Nat) : Bool :=
@@ -154,11 +144,7 @@ protected def bit (x:GF) (idx:Nat) : Bool :=
   else
     false
 
-
 end GF
-
-@[extern "lean_gf_iszero"]
-constant gf_iszero : GF -> GF
 
 @[extern "lean_gf_inv"]
 constant gf_inv : GF -> GF
@@ -223,9 +209,26 @@ def load4 {n} (r: ByteVec n) (i:Nat) : UInt32 :=
 def load4Array {n:Nat} (r: ByteVec (4*n)) : Vector n UInt32 :=
   Vector.generate n (λi => load4 r (4*i.val))
 
+def poly_full_mul {m n:Nat} {α:Type _} [Add α] [Mul α] [OfNat α 0] (x : Vector m α) (y : Vector n α) : Vector (m+n-1) α := Id.run do
+  let mut prod : Vector (m+n-1) α := Vector.replicate (m+n-1) 0
+  let _h : Inhabited α := ⟨0⟩
+  for i in range 0 m do
+    for j in range 0 n do
+      prod := prod.set! (i+j) (prod.get! (i+j) + x.get! i * y.get! j)
+  pure prod
 
-@[extern "lean_GF_mul"]
-constant GF_mul (x y : Vector sys_t GF) : Vector sys_t GF
+def GF_red (z : Vector (2*sys_t-1) GF) : Vector sys_t GF := Id.run do
+  let mut z := z
+  for j in range 0 (sys_t-1) do
+    let i := sys_t-2 - j
+    let p := z.get! (sys_t+i)
+    z := z.sub! (i+3) p
+    z := z.sub! (i+1) p
+    z := z.sub! (i+0) (2*p)
+  pure (Vector.generate sys_t λi => z.get! i)
+
+def GF_mul (x y : Vector sys_t GF) : Vector sys_t GF :=
+  GF_red (@poly_full_mul sys_t sys_t GF _ _ _ x y)
 
 def genPolyGen_mask (mat : Matrix (sys_t+1) sys_t GF) (j:Nat) : GF := Id.run do
   let mut r := mat.get! j j
@@ -249,10 +252,9 @@ def genPolyGen (f : Vector sys_t GF) : Option (Vector sys_t GF) := Id.run do
   let v0 : Vector sys_t GF := Vector.generate sys_t λi => if i = 0 then 1 else 0
   let mut mat := Matrix.unfoldBy (GF_mul f) v0
   for j in range 0 sys_t do
-    let r0 := mat.get! j j
-    let r := genPolyGen_mask mat j
-    let mask := gf_iszero r0
-    let r := r0 &&& ~~~mask ||| r &&& mask
+    let mut r := mat.get! j j
+    if r = 0 then
+      r := genPolyGen_mask mat j
     if r = 0 then
       return none
     else
@@ -476,7 +478,7 @@ constant apply_benes0 (l : @&(BitVec (1 <<< gfbits)))
                       (c : @&(ByteVec cond_bytes))
                       : BitVec (1 <<< gfbits)
 
-def support_gen (c : @&(ByteVec cond_bytes)) : Vector N GF := Id.run do
+def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
   let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
         Vector.generate gfbits λj =>
           let v :=
@@ -492,9 +494,9 @@ def support_gen (c : @&(ByteVec cond_bytes)) : Vector N GF := Id.run do
     pure (OfNat.ofNat si)
 
 def synd
-    (g: @&(Vector sys_t GF))
-    (l : @&(Vector N GF))
-    (error_bitmask : @&(BitVec N))
+    (g: Vector sys_t GF)
+    (l : Vector N GF)
+    (error_bitmask : BitVec N)
    : Vector (2*sys_t) GF := Id.run do
   let mut out := Vector.replicate (2*sys_t) 0
   let f := g.push 1
@@ -534,18 +536,6 @@ def bm
            if i = 0 then 0 else B.get! (i-1)
   pure $ Vector.generate (sys_t+1) λi => C.get! (sys_t-i)
 
-constant decrypt
-    (images : @&(Vector N GF))
-    (s: @&(Vector (2*sys_t) GF))
-   : Nat × BitVec N := Id.run do
-  let mut w : Nat := 0
-  let mut e : BitVec N := BitVec.zero _
-  for i in range 0 N do
-    if gf_iszero (images.get! i) &&& 1 = 1 then
-      e := e.msbb_set! i True
-      w := w + 1
-  pure (w, e)
-
 def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
   let g := sk.goppa
   let l := support_gen sk.controlbits
@@ -553,7 +543,13 @@ def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
   let s := synd g l r
   let locator := bm s
   let images := (λi => gf_inv (eval locator i)) <$> l
-  let (w, e) := decrypt images s
+
+  let mut w : Nat := 0
+  let mut e : BitVec N := BitVec.zero _
+  for i in range 0 N do
+    if images.get! i = 0 then
+      e := e.msbb_set! i True
+      w := w + 1
   -- Generate preimage
   if w = sys_t ∧ Ciphertext.mkHash e = c.hash ∧ s = synd g l e then
     some e

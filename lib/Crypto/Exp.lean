@@ -4,12 +4,10 @@ exponentation operation over the monoid.
 -/
 
 
-class CommMulMonoid (α : Type u) extends Mul α  where
+class CommMulMonoid (α : Type u) extends Mul α, OfNat α 1 where
   mul_assoc := ∀(x y z : α), (x * y) * z = x * (y * z)
   mul_comm  := ∀(x y : α), x * y = y * x
-
-  one : α
-  mul_one := ∀(x : α), x * one = x
+  mul_one := ∀(x : α), x * 1 = x
 
   sq : α → α := λx => mul x x
   sq_is_self_add : ∀(x : α), sq x = mul x x := by
@@ -39,5 +37,6 @@ def exp' {α : Type u} [h: CommMulMonoid α] (r x : α) (n : Nat) : α :=
     if n = 1 then x * r else r
 decreasing_by exact exp_terminates _ ‹_›
 
-def exp {α : Type u} [h: CommMulMonoid α] (x : α) (n : Nat) : α :=
-  exp' CommMulMonoid.one x n
+def exp {α : Type u} [CommMulMonoid α] (x : α) (n : Nat) : α :=
+  let _h : OfNat α 1 := CommMulMonoid.toOfNat
+  exp' 1 x n
