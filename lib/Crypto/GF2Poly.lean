@@ -41,53 +41,6 @@ structure GF2Poly where
   bits : Nat
   deriving DecidableEq
 
-/-! First some lemmas about bitwise operations on `Nat`s -/
-namespace Nat
-
-@[simp] theorem zero_xor (n : Nat) : 0 ^^^ n = n := by rfl
-@[simp] theorem xor_zero (n : Nat) : n ^^^ 0 = n := by cases n <;> rfl
-
-@[simp] theorem xor_self (n : Nat) : n ^^^ n = 0 := by
-  show Nat.bitwise bne n n = 0
-  induction n using Nat.strongInductionOn with
-  | ind n ih =>
-    unfold bitwise
-    cases (inferInstance : Decidable (n = 0)) with
-    | isTrue hEq => simp [hEq]
-    | isFalse hNe =>
-      have hRec : bitwise bne (n / 2) (n / 2) = 0 :=
-        ih _ (Nat.div_lt_self (Nat.zero_lt_of_ne_zero hNe) (Nat.lt_succ_self _))
-      simp [hRec, hNe]
-
-theorem xor_comm (a b : Nat) : a ^^^ b = b ^^^ a := by
-  sorry
-
-theorem xor_assoc (a b c : Nat) : a ^^^ b ^^^ c = a ^^^ (b ^^^ c) := by
-  sorry
-
--- TODO(WN): @[csimp] would be nice
-theorem mul_two_pow_eq_shiftLeft (n k : Nat) : n * (2 ^ k) = n <<< k := by
-  induction k generalizing n with
-  | zero =>
-    show n * 1 = n
-    rw [Nat.mul_one]
-  | succ k ih =>
-    show n * (2^k * 2) = (2*n) <<< k
-    -- ac_refl :'(
-    simp [← ih, Nat.mul_assoc, Nat.mul_comm]
-
--- @[csimp]
-theorem div_two_pow_eq_shiftRight (n k : Nat) : n / (2 ^ k) = n >>> k := by
-  induction k generalizing n with
-  | zero =>
-    show n / 1 = n
-    rw [Nat.div_one]
-  | succ k ih =>
-    show n / (2^k * 2) = (n >>> k) / 2
-    simp [← ih, Nat.div_div_eq_div_mul]
-
-end Nat
-
 namespace GF2Poly
 
 def ofBits : Nat → GF2Poly :=
