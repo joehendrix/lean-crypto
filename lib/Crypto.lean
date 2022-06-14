@@ -430,7 +430,7 @@ def cSyndrome (pk : PublicKey) (e: BitVec N) : BitVec pk_nrows := Id.run do
   for i in range 0 pk_nrows do
     let off := (BitVec.zero pk_nrows).msbb_set! i True
     let row : BitVec N := off ++ pk.get! i
-    if (row &&& e).foldl Bool.xor false then
+    if (row &&& e).foldl (· ^^^ ·) false then
       s := s.msbb_set! i True
   pure s
 
