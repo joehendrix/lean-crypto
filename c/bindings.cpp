@@ -285,10 +285,6 @@ extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in
     return r_obj;
 }
 
-extern "C" uint16_t lean_gf_add(uint16_t x, uint16_t y) {
-    return gf_add(x, y);
-}
-
 extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
     return gf_mul(x, y);
 }
@@ -296,7 +292,6 @@ extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
 extern "C" uint16_t lean_gf_frac(uint16_t x, uint16_t y) {
     return gf_frac(x, y);
 }
-
 
 extern "C"
 uint16_t lean_gf_inv(uint16_t x) {
@@ -317,32 +312,6 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
         store_gf(sk + i*2, irr[i]);
 
     return sk_obj;
-}
-
-extern "C" uint16_t lean_bitrev(uint16_t x) {
-    return bitrev(x);
-}
-
-/* input: polynomial f and field element a */
-/* return f(a) */
-static
-gf my_eval(const gf *f, gf a) {
-	gf r = f[ SYS_T ];
-
-	for (int i = SYS_T-1; i >= 0; i--) {
-		r = gf_mul(r, a);
-		r = gf_add(r, f[i]);
-	}
-
-	return r;
-}
-
-extern "C"  uint16_t lean_eval(b_lean_obj_arg g_obj, uint16_t x) {
-	gf g[ SYS_T+1 ]; // Goppa polynomial
-    for (size_t i = 0; i != SYS_T+1; ++i) {
-        g[i] = lean_unbox_uint32(lean_array_get_core(g_obj, i));
-    }
-    return my_eval(g, x);
 }
 
 extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
@@ -389,36 +358,23 @@ static void layer(uint64_t * data, uint64_t * bits, int lgs) {
 /*        bits, condition bits of the Benes network */
 /*        rev, 0 for normal application; !0 for inverse */
 /* output: r, permuted bits */
-void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
-{
-	int i;
+void my_apply_benes0(unsigned char * r2, const unsigned char * bits) {
 
-	const unsigned char *cond_ptr;
-	int inc, low;
 
 	uint64_t bs[64];
-	for (i = 0; i < 64; i++) {
+	for (int i = 0; i < 64; i++) {
 		bs[i] = load8(r2 + i*8);
 	}
 
 
-	if (rev == 0)
-	{
-		inc = 256;
-		cond_ptr = bits;
-	}
-	else
-	{
-		inc = -256;
-		cond_ptr = bits + (2*GFBITS-2)*256;
-	}
+    int inc = 256;
+	const unsigned char *cond_ptr = bits;
 
 	transpose_64x64(bs, bs);
 
 	uint64_t cond[64];
-	for (low = 0; low <= 5; low++)
-	{
-		for (i = 0; i < 64; i++)
+	for (int low = 0; low <= 5; low++) {
+		for (int i = 0; i < 64; i++)
             cond[i] = load4(cond_ptr + i*4);
 		transpose_64x64(cond, cond);
 		layer(bs, cond, low);
@@ -427,16 +383,14 @@ void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
 
 	transpose_64x64(bs, bs);
 
-	for (low = 0; low <= 5; low++)
-	{
-		for (i = 0; i < 32; i++)
+	for (int low = 0; low <= 5; low++) {
+		for (int i = 0; i < 32; i++)
             cond[i] = load8(cond_ptr + i*8);
 		layer(bs, cond, low);
 		cond_ptr += inc;
 	}
-	for (low = 4; low >= 0; low--)
-	{
-		for (i = 0; i < 32; i++)
+	for (int low = 4; low >= 0; low--) {
+		for (int i = 0; i < 32; i++)
             cond[i] = load8(cond_ptr + i*8);
 		layer(bs, cond, low);
 		cond_ptr += inc;
@@ -444,9 +398,8 @@ void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
 
 	transpose_64x64(bs, bs);
 
-	for (low = 5; low >= 0; low--)
-	{
-		for (i = 0; i < 64; i++)
+	for (int low = 5; low >= 0; low--) {
+		for (int i = 0; i < 64; i++)
             cond[i] = load4(cond_ptr + i*4);
 		transpose_64x64(cond, cond);
 		layer(bs, cond, low);
@@ -455,7 +408,7 @@ void my_apply_benes(unsigned char * r2, const unsigned char * bits, int rev)
 
 	transpose_64x64(bs, bs);
 
-	for (i = 0; i < 64; i++) {
+	for (int i = 0; i < 64; i++) {
 		store8(r2 + i*8, bs[i]);
 	}
 }
@@ -467,7 +420,7 @@ extern "C" lean_obj_res lean_apply_benes0(b_lean_obj_arg r_obj, b_lean_obj_arg c
     unsigned char r[(1 << GFBITS)/8];
     nat_export_to_bytes((1 << GFBITS)/8, r, r_obj);
 
-	my_apply_benes(r, c, 0);
+	my_apply_benes0(r, c);
 
     return nat_import_from_bytes((1 << GFBITS)/8, r);
 }

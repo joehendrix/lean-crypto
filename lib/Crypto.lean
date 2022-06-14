@@ -144,13 +144,19 @@ protected def bit (x:GF) (idx:Nat) : Bool :=
   else
     false
 
+def bitrev (x:GF) : GF :=
+  let a : UInt16 := x.val
+  let a := ((a &&& 0x00FF) <<< 8) ||| ((a &&& 0xFF00) >>> 8)
+  let a := ((a &&& 0x0F0F) <<< 4) ||| ((a &&& 0xF0F0) >>> 4)
+  let a := ((a &&& 0x3333) <<< 2) ||| ((a &&& 0xCCCC) >>> 2)
+  let a := ((a &&& 0x5555) <<< 1) ||| ((a &&& 0xAAAA) >>> 1)
+  ⟨a >>> 4, sorry⟩
+
 end GF
 
 @[extern "lean_gf_inv"]
 constant gf_inv : GF -> GF
 
-@[extern "lean_bitrev"]
-constant gf_bitrev : GF -> GF
 
 def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
   let f (x:UInt8) : UInt16 := UInt16.ofNat x.toNat
@@ -292,10 +298,14 @@ def randomPermutation (perm : Vector (1 <<< gfbits) UInt32)
 
   pure (some (Perm.idx <$> v))
 
-@[extern "lean_eval"]
-constant eval (sk : Vector (sys_t+1) GF) (x : GF) : GF
+def eval (f : Vector (sys_t+1) GF) (a : GF) : GF := Id.run do
+  let mut r := f.get! sys_t
+  for j in range 0 sys_t do
+    r := r * a
+    r := r + f.get! (sys_t - 1 - j)
+  pure r
 
-def init_mat_row (inv : @&(Vector N GF)) (k : @&Nat) : BitVec N :=
+def init_mat_row (inv : Vector N GF) (k : Nat) : BitVec N :=
   BitVec.generate_lsb N λi =>
     let gf := inv.get i
     gf.bit k
@@ -303,7 +313,9 @@ def init_mat_row (inv : @&(Vector N GF)) (k : @&Nat) : BitVec N :=
 def flatten [Inhabited α] (v : Vector m (Vector n α)) : Vector (m*n) α :=
   Vector.generate (m*n) λi => (v.get! (i.val/n)).get! (i.val%n)
 
-def init_mat (inv0 : Vector N GF) (L : Vector N GF) : Vector pk_nrows (BitVec N) := Id.run do
+def init_mat (g : Vector sys_t GF) (L : Vector N GF) : Vector pk_nrows (BitVec N) := Id.run do
+  let g' := g.push 1
+  let inv0 := (λx => gf_inv (eval g' x)) <$> L
   flatten $
     Vector.generate sys_t λi =>
       let inv := Vector.generate N λj =>
@@ -342,10 +354,8 @@ def gaussian_elim (m : Vector pk_nrows (BitVec N))
   pure (some m)
 
 def mkPublicKey (g : Vector sys_t GF) (pi: Vector (1 <<< gfbits) GF) : Option PublicKey := do
-  let L   := Vector.generate N λi => gf_bitrev (pi.get! i)
-  let g' := g.push 1
-  let inv := (λx => gf_inv (eval g' x)) <$> L
-  PublicKey.init <$> gaussian_elim (init_mat inv L)
+  let L   := Vector.generate N λi => (pi.get! i).bitrev
+  PublicKey.init <$> gaussian_elim (init_mat g L)
 
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
   let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
@@ -484,7 +494,7 @@ def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
           let v :=
             BitVec.generate_msbb λ(i : Fin (1 <<< gfbits)) =>
               let i : GF := OfNat.ofNat i.val
-              (gf_bitrev i).bit j
+              i.bitrev.bit j
           apply_benes0 v c
   Vector.generate N λ i => Id.run do
     let mut si : Nat := 0

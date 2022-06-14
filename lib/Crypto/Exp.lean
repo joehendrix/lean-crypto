@@ -30,7 +30,6 @@ end
 
 def exp' {α : Type u} [h: CommMulMonoid α] (r x : α) (n : Nat) : α :=
   if h : n ≥ 2 then
-    let k := n % 2
     let r := if n%2 = 1 then r * x else r
     exp' r (CommMulMonoid.sq x) (n / 2)
   else
