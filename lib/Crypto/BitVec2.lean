@@ -1,27 +1,61 @@
 import Crypto.Range
 import Crypto.UInt8
+import Crypto.ToMathlib
 
-def BitVec (n:Nat) := Fin (2^n)
+/-!
+We define bitvectors in two variants - indexed and packed. The indexed variant is helpful
+for stating strongly-typed interfaces, whereas the packed one is better for stating some
+properties without the dependent index getting in the way.
+-/
+
+def BitVec (w : Nat) := Fin (2^w)
+
+@[ext]
+structure BitVec.Packed where
+  width : Nat
+  data : Fin (2^width)
 
 namespace BitVec
+namespace Packed
 
-protected def zero (n:Nat) : BitVec n := ⟨0, sorry⟩
+@[ext]
+theorem ext' {a b : Packed} (hWidth : a.width = b.width)
+    (hData : a.data.val = b.data.val) : a = b := by
+  let ⟨aw, ad, _⟩ := a
+  let ⟨bw, bd, _⟩ := b
+  cases hWidth
+  cases hData
+  rfl
 
-instance : Inhabited (BitVec n) := ⟨BitVec.zero n⟩
+end Packed
 
-protected def append {m n:Nat} (x:BitVec m) (y:BitVec n) : BitVec (m+n) :=
-  ⟨x.val <<< n ||| y.val, sorry⟩
+protected def zero (w : Nat) : BitVec w :=
+  ⟨0, Nat.pos_pow_of_pos _ <| by decide⟩
 
-instance : HAppend (BitVec m) (BitVec n) (BitVec (m+n)) where
+instance : Inhabited (BitVec w) := ⟨BitVec.zero w⟩
+
+protected def append (x : BitVec w) (y : BitVec v) : BitVec (w+v) :=
+  ⟨x.val <<< w ||| y.val, sorry⟩
+
+instance : HAppend (BitVec w) (BitVec v) (BitVec (w+v)) where
   hAppend := BitVec.append
 
-protected def and (x y : BitVec n) : BitVec n := ⟨x.val &&& y.val, sorry⟩
-protected def or  (x y : BitVec n) : BitVec n := ⟨x.val ||| y.val, sorry⟩
-protected def xor (x y : BitVec n) : BitVec n := ⟨x.val ^^^ y.val, sorry⟩
+protected def and (x y : BitVec w) : BitVec w :=
+  ⟨x.val &&& y.val, sorry⟩
+protected def or (x y : BitVec w) : BitVec w :=
+  ⟨x.val ||| y.val, sorry⟩
+protected def xor (x y : BitVec w) : BitVec w :=
+  ⟨x.val ^^^ y.val, sorry⟩
+protected def shiftLeft (x : BitVec w) (n : Nat) : BitVec w :=
+  Fin.ofNat' (x.val <<< n) (Nat.pos_pow_of_pos _ (by decide))
+protected def shiftRight (x : BitVec w) (n : Nat) : BitVec w :=
+  ⟨x.val >>> n, sorry⟩
 
-instance : AndOp (BitVec n) := ⟨BitVec.and⟩
-instance : OrOp (BitVec n) := ⟨BitVec.or⟩
-instance : Xor (BitVec n) := ⟨BitVec.xor⟩
+instance : AndOp (BitVec w) := ⟨BitVec.and⟩
+instance : OrOp (BitVec w) := ⟨BitVec.or⟩
+instance : Xor (BitVec w) := ⟨BitVec.xor⟩
+instance : HShiftLeft (BitVec w) Nat (BitVec w) := ⟨BitVec.shiftLeft⟩
+instance : HShiftRight (BitVec w) Nat (BitVec w) := ⟨BitVec.shiftRight⟩
 
 def lsb_get! {m:Nat} (x:BitVec m) (i:Nat) : Bool :=
   (x.val &&& (1 <<< i)) ≠ 0
