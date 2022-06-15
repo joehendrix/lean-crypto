@@ -96,7 +96,7 @@ def add (p q : GF2Poly) : GF2Poly :=
 instance : Add GF2Poly := ⟨add⟩
 instance : Neg GF2Poly := ⟨id⟩
 
-variable (p q r : GF2Poly)
+lemma add_degree (p q : GF2Poly) : (p + q).degree ≤ max p.degree q.degree := sorry
 
 def mul (p q : GF2Poly) : GF2Poly :=
   q.coeffs.foldr (init := 0) fun qc acc =>
@@ -104,6 +104,8 @@ def mul (p q : GF2Poly) : GF2Poly :=
     if qc = (1 : GF2) then acc' + p else acc'
 
 instance : Mul GF2Poly := ⟨mul⟩
+
+theorem mul_degree (p q : GF2Poly) : (p * q).degree ≤ p.degree + q.degree := sorry
 
 def pow (p : GF2Poly) (n : Nat) : GF2Poly :=
   if h : n = 0 then 1
