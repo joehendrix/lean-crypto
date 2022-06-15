@@ -485,27 +485,37 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
 @[extern "lean_transpose64"]
 constant tranpose64 (a : @&(Vector 64 UInt64)) : Vector 64 UInt64
 
-@[extern "lean_benes_round_transpose"]
-constant benes_round_transpose
+def load4_64
+  (c : ByteVec 256)
+  : Vector 64 UInt64 :=
+  Vector.generate 64 $ λi => Id.run do
+    let mut r := 0
+    for j in range 0 4 do
+      r := (r <<< 8) ||| (c.get! (4*i+3-j)).toNat
+    pure $ UInt64.ofNat r
+
+@[extern "lean_benes_layer"]
+constant benes_layer
   (a : @&(Vector 64 UInt64))
-  (c : @&(ByteVec 256))
+  (c : @&(Vector 32 UInt64))
   (l : @&Nat)
   : Vector 64 UInt64
 
-@[extern "lean_benes_round"]
-constant benes_round
-  (a : @&(Vector 64 UInt64))
-  (c : @&(ByteVec 256))
-  (l : @&Nat)
-  : Vector 64 UInt64
+def slice {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
+  ByteVec.generate n (λi => v.get! (l+i))
 
-def load8_off (v:Nat) (i:Nat): UInt64 := Id.run do
-  let n := (v >>> (64*(63-i))) &&& (2^64 - 1)
+def load8 (n:Nat) : UInt64 := Id.run do
   let mut r := 0
   for j in range 0 8 do
     r := (r <<< 8) ||| ((n >>> (8*j)) &&& 0xff)
-  let z := UInt64.ofNat r
-  pure z
+  pure $ UInt64.ofNat r
+
+def load8_32 (c: ByteVec 256) : Vector 32 UInt64 :=
+  Vector.generate 32 $ λi => Id.run do
+    let mut r := 0
+    for j in range 0 8 do
+      r := (r <<< 8) ||| (c.get! (8*i+(7-j))).toNat
+    pure $ UInt64.ofNat r
 
 def bitvecFromUInt64Vec (r:Vector 64 UInt64) : BitVec (1 <<< gfbits) :=
   BitVec.generate_lsb (1 <<< gfbits) $ λi =>
@@ -514,32 +524,37 @@ def bitvecFromUInt64Vec (r:Vector 64 UInt64) : BitVec (1 <<< gfbits) :=
     let m2 := 8 * (7 - m/8) + m % 8
     (e &&& UInt64.ofNat (1 <<< m2)) ≠ 0
 
-def slice {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
-  ByteVec.generate n (λi => v.get! (l+i))
-
 def apply_benes0 (r : BitVec (1 <<< gfbits))
                  (c : ByteVec cond_bytes)
     : BitVec (1 <<< gfbits) := Id.run do
   let inc := 256
 
-  let mut a := Vector.generate 64 (λi => load8_off r.val i.val)
+  let mut a :=
+      Vector.generate 64 $ λi =>
+        load8 ((r.val >>> (64*(63-i.val))) &&& (2^64 - 1))
   a := tranpose64 a
-  for i in range 0 6 do
-    let c := slice c (inc*i) inc
-    a := benes_round_transpose a c i
+  for l in range 0 6 do
+    let c := slice c (inc*l) inc
+    let c := load4_64 c
+    let c := tranpose64 c
+    let c := Vector.generate 32 (λi => c.get! i)
+    a := benes_layer a c l
   a := tranpose64 a
   for i in range 0 6 do
     let c := slice c (inc*(6+i)) inc
-    a := benes_round a c i
+    a := benes_layer a (load8_32 c) i
   for j in range 0 5 do
     let i := 4 - j
     let c := slice c (inc*(16-i)) inc
-    a := benes_round a c i
+    a := benes_layer a (load8_32 c) i
   a := tranpose64 a
   for j in range 0 6 do
-    let i := 5 - j
-    let c := slice c (inc*(22-i)) inc
-    a := benes_round_transpose a c i
+    let l := 5 - j
+    let c := slice c (inc*(22-l)) inc
+    let c := load4_64 c
+    let c := tranpose64 c
+    let c := Vector.generate 32 (λi => c.get! i)
+    a := benes_layer a c l
   a := tranpose64 a
 
   pure (bitvecFromUInt64Vec a)

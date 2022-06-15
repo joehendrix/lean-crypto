@@ -351,6 +351,38 @@ static void layer(uint64_t * data, const uint64_t* bits, int lgs) {
     }
 }
 
+extern "C" lean_obj_res
+lean_benes_layer(b_lean_obj_arg a_obj,
+                 b_lean_obj_arg c_obj,
+                 b_lean_obj_arg low_obj) {
+
+    assert(lean_array_size(a_obj) == 64);
+	uint64_t bs[64];
+	for (int i = 0; i < 64; i++) {
+        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
+	}
+
+    assert(lean_array_size(c_obj) == 32);
+	uint64_t cond[32];
+	for (int i = 0; i < 32; i++) {
+        cond[i] = lean_unbox_uint64(lean_array_get_core(c_obj, i));
+	}
+
+    if (LEAN_UNLIKELY(!lean_is_scalar(low_obj))) {
+        lean_internal_panic_out_of_memory();
+    }
+    size_t low = lean_unbox(low_obj);
+
+    layer(bs, cond, low);
+
+
+    lean_obj_res r_obj = lean_alloc_array(64, 64);
+	for (int i = 0; i < 64; i++) {
+        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
+	}
+    return r_obj;
+}
+
 /* input: in, a 64x64 matrix over GF(2) */
 /* output: out, transpose of in */
 static
@@ -395,81 +427,6 @@ extern "C" lean_obj_res lean_transpose64(b_lean_obj_arg a_obj) {
 	}
 
 	my_transpose_64x64(bs, bs);
-
-    lean_obj_res r_obj = lean_alloc_array(64, 64);
-	for (int i = 0; i < 64; i++) {
-        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
-	}
-    return r_obj;
-}
-
-static
-void apply_benes_round_transpose(uint64_t* bs, const unsigned char* cond_ptr, int low) {
-	uint64_t cond[64];
-    memset(cond, 0, sizeof(cond));
-    for (int i = 0; i < 64; i++)
-        cond[i] = load4(cond_ptr + i*4);
-    my_transpose_64x64(cond, cond);
-    layer(bs, cond, low);
-}
-
-extern "C" lean_obj_res
-lean_benes_round_transpose(b_lean_obj_arg a_obj,
-                           b_lean_obj_arg c_obj,
-                           b_lean_obj_arg low_obj) {
-
-    assert(lean_array_size(a_obj) == 64);
-	uint64_t bs[64];
-	for (int i = 0; i < 64; i++) {
-        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
-	}
-
-    assert(lean_sarray_size(c_obj) == 64 * 4);
-    const uint8_t* c = lean_sarray_cptr(c_obj);
-
-    if (LEAN_UNLIKELY(!lean_is_scalar(low_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t low = lean_unbox(low_obj);
-
-    apply_benes_round_transpose(bs, c, low);
-
-    lean_obj_res r_obj = lean_alloc_array(64, 64);
-	for (int i = 0; i < 64; i++) {
-        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
-	}
-    return r_obj;
-}
-
-static
-void apply_benes_round(uint64_t* bs, const unsigned char* cond_ptr, int low) {
-    uint64_t cond[64];
-    memset(cond, 0, sizeof(cond));
-    for (int i = 0; i < 32; i++)
-        cond[i] = load8(cond_ptr + i*8);
-    layer(bs, cond, low);
-}
-
-extern "C" lean_obj_res
-lean_benes_round(b_lean_obj_arg a_obj,
-                 b_lean_obj_arg c_obj,
-                 b_lean_obj_arg low_obj) {
-
-    assert(lean_array_size(a_obj) == 64);
-	uint64_t bs[64];
-	for (int i = 0; i < 64; i++) {
-        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
-	}
-
-    assert(lean_sarray_size(c_obj) == 32 * 8);
-    const uint8_t* c = lean_sarray_cptr(c_obj);
-
-    if (LEAN_UNLIKELY(!lean_is_scalar(low_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t low = lean_unbox(low_obj);
-
-    apply_benes_round(bs, c, low);
 
     lean_obj_res r_obj = lean_alloc_array(64, 64);
 	for (int i = 0; i < 64; i++) {
