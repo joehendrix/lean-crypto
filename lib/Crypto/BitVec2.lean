@@ -84,18 +84,19 @@ def msbb_set! (x : BitVec m) (i : Nat) (c : Bool) : BitVec m :=
 
 protected def toBinary (x : BitVec n) : String :=
   let l := Nat.toDigits 2 x.val
-  String.mk (List.replicate (n - l.length) '0' ++ l)
+  "0b" ++ String.mk (List.replicate (n - l.length) '0' ++ l)
 
 protected def toHex (x : BitVec n) : String :=
   let l := Nat.toDigits 16 x.val
-  String.mk (List.replicate (n/4 - l.length) '0' ++ l)
+  "0x" ++ String.mk (List.replicate (n/4 - l.length) '0' ++ l)
 
 protected def toHex2 (x : BitVec n) : String := Id.run do
-  let mut s : String := ""
+  let mut s : String := "0x"
   for i in range 0 (n/8) do
     let b := UInt8.ofNat (x.val >>> (8*i))
     s := s ++ b.toHex
   pure s
+
 instance : ToString (BitVec n) := ⟨BitVec.toHex2⟩
 
 def reverse (x : BitVec n) : BitVec n := Id.run do
