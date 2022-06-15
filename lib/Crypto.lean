@@ -33,8 +33,7 @@ structure DRBG where
 
 instance : Inhabited DRBG := ⟨Inhabited.default, Inhabited.default⟩
 
-def tryN {α:Type _ } (f:DRBG → Option α × DRBG)
-     : ∀(drbg:DRBG) (attempts:Nat), Option α × DRBG
+def tryN {α:Type _ } (f:DRBG → Option α × DRBG) : DRBG → Nat → Option α × DRBG
   | drbg, 0 =>
     (none, drbg)
   | drbg, Nat.succ attempts =>
@@ -483,10 +482,67 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
     some ({ e := e, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
-@[extern "lean_apply_benes0"]
-constant apply_benes0 (l : @&(BitVec (1 <<< gfbits)))
-                      (c : @&(ByteVec cond_bytes))
-                      : BitVec (1 <<< gfbits)
+@[extern "lean_transpose64"]
+constant tranpose64 (a : @&(Vector 64 UInt64)) : Vector 64 UInt64
+
+@[extern "lean_benes_round_transpose"]
+constant benes_round_transpose
+  (a : @&(Vector 64 UInt64))
+  (c : @&(ByteVec 256))
+  (l : @&Nat)
+  : Vector 64 UInt64
+
+@[extern "lean_benes_round"]
+constant benes_round
+  (a : @&(Vector 64 UInt64))
+  (c : @&(ByteVec 256))
+  (l : @&Nat)
+  : Vector 64 UInt64
+
+def load8_off (v:Nat) (i:Nat): UInt64 := Id.run do
+  let n := (v >>> (64*(63-i))) &&& (2^64 - 1)
+  let mut r := 0
+  for j in range 0 8 do
+    r := (r <<< 8) ||| ((n >>> (8*j)) &&& 0xff)
+  let z := UInt64.ofNat r
+  pure z
+
+def bitvecFromUInt64Vec (r:Vector 64 UInt64) : BitVec (1 <<< gfbits) :=
+  BitVec.generate_lsb (1 <<< gfbits) $ λi =>
+    let e := r.get! (63 - i/64)
+    let m := i.val % 64
+    let m2 := 8 * (7 - m/8) + m % 8
+    (e &&& UInt64.ofNat (1 <<< m2)) ≠ 0
+
+def slice {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
+  ByteVec.generate n (λi => v.get! (l+i))
+
+def apply_benes0 (r : BitVec (1 <<< gfbits))
+                 (c : ByteVec cond_bytes)
+    : BitVec (1 <<< gfbits) := Id.run do
+  let inc := 256
+
+  let mut a := Vector.generate 64 (λi => load8_off r.val i.val)
+  a := tranpose64 a
+  for i in range 0 6 do
+    let c := slice c (inc*i) inc
+    a := benes_round_transpose a c i
+  a := tranpose64 a
+  for i in range 0 6 do
+    let c := slice c (inc*(6+i)) inc
+    a := benes_round a c i
+  for j in range 0 5 do
+    let i := 4 - j
+    let c := slice c (inc*(16-i)) inc
+    a := benes_round a c i
+  a := tranpose64 a
+  for j in range 0 6 do
+    let i := 5 - j
+    let c := slice c (inc*(22-i)) inc
+    a := benes_round_transpose a c i
+  a := tranpose64 a
+
+  pure (bitvecFromUInt64Vec a)
 
 def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
   let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
