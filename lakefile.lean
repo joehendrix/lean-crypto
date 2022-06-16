@@ -464,8 +464,14 @@ package crypto {
   moreLeancArgs := #["-O3"]
 }
 
+lean_lib Crypto {
+  moreLinkArgs := #["-Xlinker", "--error-limit=0"]
+  -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
+}
+
 @[defaultTarget]
-lean_lib crypto {
+lean_exe CryptoMain {
+  root := `Main
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]
   -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
 }
