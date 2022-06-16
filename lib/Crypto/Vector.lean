@@ -36,6 +36,10 @@ def sub! {n:Nat} {α:Type _} [Sub α] (v:Vector n α) (i: Nat) (e:α) : Vector n
   let h : Inhabited α := ⟨e⟩
   { data := v.data.set! i (v.data.get! i - e), size_proof := sorry }
 
+def xor! {n:Nat} {α:Type _} [Xor α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
+  let h : Inhabited α := ⟨e⟩
+  { data := v.data.set! i (v.data.get! i ^^^ e), size_proof := sorry }
+
 protected
 def replicate {α : Type _} (n:Nat) (d:α): Vector n α  := Vector.generate n (λi => d)
 

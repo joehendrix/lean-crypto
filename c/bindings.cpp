@@ -331,58 +331,6 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
     return sk_obj;
 }
 
-extern "C" gf bitrev(gf a);
-
-#define min(a, b) ((a < b) ? a : b)
-
-/* one layer of the benes network */
-// This reads 32 entries out of bits0
-// This writes 64  entries to data.
-static void layer(uint64_t * data, const uint64_t* bits, int lgs) {
-	int s = 1 << lgs;
-
-	for (int h = 0; h < 32; h += s) {
-    	for (int k = 0; k < s; ++k) {
-            int j = 2*h+k;
-            uint64_t d = (data[j+0] ^ data[j+s]) & bits[h+k];
-            data[j+0] ^= d;
-            data[j+s] ^= d;
-    	}
-    }
-}
-
-extern "C" lean_obj_res
-lean_benes_layer(b_lean_obj_arg a_obj,
-                 b_lean_obj_arg c_obj,
-                 b_lean_obj_arg low_obj) {
-
-    assert(lean_array_size(a_obj) == 64);
-	uint64_t bs[64];
-	for (int i = 0; i < 64; i++) {
-        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
-	}
-
-    assert(lean_array_size(c_obj) == 32);
-	uint64_t cond[32];
-	for (int i = 0; i < 32; i++) {
-        cond[i] = lean_unbox_uint64(lean_array_get_core(c_obj, i));
-	}
-
-    if (LEAN_UNLIKELY(!lean_is_scalar(low_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t low = lean_unbox(low_obj);
-
-    layer(bs, cond, low);
-
-
-    lean_obj_res r_obj = lean_alloc_array(64, 64);
-	for (int i = 0; i < 64; i++) {
-        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
-	}
-    return r_obj;
-}
-
 /* input: in, a 64x64 matrix over GF(2) */
 /* output: out, transpose of in */
 static

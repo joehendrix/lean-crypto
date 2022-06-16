@@ -494,12 +494,21 @@ def load4_64
       r := (r <<< 8) ||| (c.get! (4*i+3-j)).toNat
     pure $ UInt64.ofNat r
 
-@[extern "lean_benes_layer"]
-constant benes_layer
-  (a : @&(Vector 64 UInt64))
-  (c : @&(Vector 32 UInt64))
-  (l : @&Nat)
-  : Vector 64 UInt64
+def benes_layer
+  (data : @&(Vector 64 UInt64))
+  (bits : @&(Vector 32 UInt64))
+  (lgs : @&Nat)
+    : Vector 64 UInt64 := Id.run do
+  let s : Nat := 1 <<< lgs
+  let mut data := data
+  for h2 in range 0 (32 >>> lgs) do
+    let h := h2 <<< lgs
+    for k in range 0 s do
+      let j := 2 * h + k
+      let d := (data.get! j ^^^ data.get! (j+s)) &&& bits.get! (h+k)
+      data := data.xor! j d
+      data := data.xor! (j+s) d
+  pure data
 
 def slice {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
   ByteVec.generate n (λi => v.get! (l+i))
