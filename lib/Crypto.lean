@@ -19,7 +19,7 @@ constant bitvecToByteVec_msbb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 constant bitvecToByteVec_lsb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
 
 def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
-  BitVec.generate_msbb (λi => v.lsb_get! i.val)
+  BitVec.generate_msbb r (λi => v.lsb_get! i.val)
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
@@ -492,7 +492,7 @@ def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
   let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
         Vector.generate gfbits λj =>
           let v :=
-            BitVec.generate_msbb λ(i : Fin (1 <<< gfbits)) =>
+            BitVec.generate_msbb _ λ(i : Fin (1 <<< gfbits)) =>
               let i : GF := OfNat.ofNat i.val
               i.bitrev.bit j
           apply_benes0 v c
