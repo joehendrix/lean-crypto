@@ -170,20 +170,17 @@ constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
-@[reducible]
+@[extern "lean_controlbitsfrompermutation"]
+constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : Option (ByteVec cond_bytes)
+
 structure SecretKey where
   seed : ByteVec 32
   goppa : Vector sys_t GF
   permutation : Vector (1 <<< gfbits) GF
+  controlbits : ByteVec cond_bytes
   rest : ByteVec (N/8)
 
 namespace SecretKey
-
-@[extern "lean_controlbitsfrompermutation"]
-constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
-
-def controlbits (sk:SecretKey) : ByteVec cond_bytes :=
-  controlBitsFromPermutation sk.permutation
 
 def byteVec (sk:SecretKey) : ByteVec Mceliece348864Ref.secretKeyBytes :=
   sk.seed
@@ -359,10 +356,12 @@ def mkPublicKey (g : Vector sys_t GF) (pi: Vector (1 <<< gfbits) GF) : Option Pu
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
   let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
   let pi ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
+  let cb ← controlBitsFromPermutation pi
   let pk ← mkPublicKey g pi
   let sk := { seed := seed,
               goppa := g,
-              permutation := pi
+              permutation := pi,
+              controlbits := cb,
               rest := r.extractN 0 (N/8)
             }
   some { pk := pk, sk := sk }
@@ -655,7 +654,8 @@ theorem decryptEncrypt (drbg drbg' : DRBG)
                (sk: SecretKey)
                (pk : PublicKey)
                (r:EncryptionResult) :
-    mkPublicKey sk.goppa sk.permutation = some pk
+    controlBitsFromPermutation sk.permutation = some sk.controlbits
+    → mkPublicKey sk.goppa sk.permutation = some pk
     → mkCryptoKemEnc drbg attempts pk = some (r, drbg')
     → cryptoKemDec1 r.ct sk = some r.e := by
   admit
