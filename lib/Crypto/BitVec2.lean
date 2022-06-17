@@ -35,7 +35,7 @@ protected def zero (w : Nat) : BitVec w :=
 instance : Inhabited (BitVec w) := ⟨BitVec.zero w⟩
 
 protected def append (x : BitVec w) (y : BitVec v) : BitVec (w+v) :=
-  ⟨x.val <<< w ||| y.val, sorry⟩
+  ⟨x.val <<< v ||| y.val, sorry⟩
 
 instance : HAppend (BitVec w) (BitVec v) (BitVec (w+v)) where
   hAppend := BitVec.append
