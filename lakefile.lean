@@ -454,6 +454,9 @@ extern_lib libcrypto :=
   let dependencies := opensslTargets __dir__
   staticLibTarget libFile dependencies
 
+require mathlib from git
+  "https://github.com/leanprover-community/mathlib4"@"8b7a86a8c1a98511e706f54beb288ee1974f052f"
+
 package crypto {
   -- customize layout
   srcDir := "lib"
@@ -461,7 +464,14 @@ package crypto {
   moreLeancArgs := #["-O3"]
 }
 
-lean_lib crypto {
+lean_lib Crypto {
+  moreLinkArgs := #["-Xlinker", "--error-limit=0"]
+  -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
+}
+
+@[defaultTarget]
+lean_exe crypto {
+  root := `Main
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]
   -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
 }
