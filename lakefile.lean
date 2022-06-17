@@ -470,7 +470,7 @@ lean_lib Crypto {
 }
 
 @[defaultTarget]
-lean_exe CryptoMain {
+lean_exe crypto {
   root := `Main
   moreLinkArgs := #["-Xlinker", "--error-limit=0"]
   -- moreLinkArgs := #["-L", (pkgDir / "deps" / "openssl-1.1.1l").toString, "-lcrypto"]
