@@ -9,14 +9,27 @@ import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
+def iterN (f : α → α) : Nat → α → α
+| 0, a => a
+| i+1, a => iterN f i (f a)
+
+def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × β :=
+  let g := λ((a, b) : ByteArray × β) =>
+        let (v, b) := f b
+        (a ++ v.data, b)
+  let (a, b) := iterN g m (ByteArray.mkEmpty (m*n), b)
+  let p : a.size = m*n := by admit
+  (⟨a, p⟩, b)
+
 @[extern "lean_elt_from_bytevec"]
-constant eltFromByteVec {w:Nat} (r:Nat) (v:ByteVec w) : BitVec r
+constant eltFromByteVec {w : @&Nat} (r : @&Nat) (v : @&(ByteVec w)) : BitVec r
 
 @[extern "lean_elt_to_bytevec"]
-constant bitvecToByteVec_msbb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+constant bitvecToByteVec_msbb { r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
 
 @[extern "lean_nat_to_bytevec_lsb"]
-constant bitvecToByteVec_lsb {r:Nat} (w:Nat) (v:BitVec r) : ByteVec w
+constant bitvecToByteVec_lsb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
+
 
 def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
   BitVec.generate_msbb r (λi => v.lsb_get! i.val)
@@ -44,11 +57,59 @@ def tryN {α:Type _ } (f:DRBG → Option α × DRBG) : DRBG → Nat → Option �
 @[reducible]
 def Seed := ByteVec 48
 
-@[extern "lean_random_init"]
-constant randombytesInit : @&Seed → DRBG
+constant incrementV (v : ByteVec 16) : ByteVec 16 := Id.run do
+  let mut v := v
+  for i in range 0 15 do
+    let j := 15 - i
+    let vj := v.get! j
+    if vj = 0xff then
+      v := v.set! j 0x00
+    else
+      v := v.add! j 1
+      break
+  pure v
 
-@[extern "lean_random_bytes"]
-constant randombytes (rbg:DRBG) (n:@&Nat) : ByteVec n × DRBG
+@[extern "lean_AES256_ECB"]
+constant aes256Ecb (key: @&ByteVec 32) (v: @&ByteVec 16) : ByteVec 16
+
+constant aes256CtrDrbgUpdate (key : ByteVec 32) (v0 : ByteVec 16) : ByteVec 48 × ByteVec 16 :=
+  let f := λv => let v := incrementV v; (aes256Ecb key v, v)
+  concatIterV 3 f v0
+
+constant randombytesInit (s : Seed) : DRBG :=
+  let key := ByteVec.generate 32 (λ_ => 0)
+  let v   := ByteVec.generate 16 (λ_ => 0)
+  let (b, _) := aes256CtrDrbgUpdate key v
+  let b := ByteVec.generate _ (λi => b.get i ^^^ s.get i)
+  { key := b.extractN 0 32, v := b.extractN 32 16 }
+
+private theorem randomBytesTerminates : ∀n, n ≥ 16 → n - 16 < n := sorry
+
+def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
+   : ByteArray × ByteVec 16 :=
+  if n == 0 then
+    (a, v)
+  else
+    let v := incrementV v
+    let b := aes256Ecb key v
+    if n ≥ 16 then
+      randombytes3 key v (a ++ b.data) (n - 16)
+    else
+      (a ++ b.data.extractN 0 n, v)
+  decreasing_by exact randomBytesTerminates _ ‹_›
+
+theorem randomBytes3_size (key) (v) (a) (n:Nat)
+    : (randombytes3 key v a n).1.size = n := by
+  admit
+
+constant randombytes (rbg : DRBG) (n : Nat) : ByteVec n × DRBG :=
+  let key := rbg.key
+  let v := rbg.v
+  let p := randombytes3 key v (ByteArray.mkEmpty n) n
+  let pr : p.1.size = n := randomBytes3_size key v (ByteArray.mkEmpty n) n
+  let (b, _) := aes256CtrDrbgUpdate key p.2
+  let rbg := { key := b.extractN 0 32, v := b.extractN 32 16 }
+  (⟨p.1, pr⟩, rbg)
 
 def initKeypairSeedPrefix : ByteVec 1 := #v[64]
 

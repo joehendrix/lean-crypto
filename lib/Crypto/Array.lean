@@ -169,4 +169,14 @@ theorem size_qsort {α} [Inhabited α] (a:Array α) (lt : α → α → Bool)
   : Array.size (Array.qsort a lt) = a.size := by
   admit
 
+@[simp]
+theorem size_setD (a:Array α) : (a.setD i e).size = a.size := by
+  simp only [setD]
+  cases Decidable.em (i < a.size) with
+    | inl h => simp [h]
+    | inr h => simp [h]
+
+theorem size_set! (a:Array α) : (a.set! i e).size = a.size := by
+  simp [set!, size_setD]
+
 end Array

@@ -234,4 +234,7 @@ theorem size_generateMap_same (n:Nat) (f:Fin n → ByteArray) {m:Nat} (p : ∀(i
   simp [size_mkEmpty]
   apply Nat.mul_comm
 
+theorem size_set! (a : ByteArray) (i : Nat) (e : UInt8) : (a.set! i e).size = a.size := by
+  simp only [set!, size, Array.size_set!]
+
 end ByteArray

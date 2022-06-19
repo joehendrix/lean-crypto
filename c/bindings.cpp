@@ -132,8 +132,7 @@ static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x
       buffer - a 128-bit ciphertext value
 */
 static void
-AES256_ECB(unsigned char *key, unsigned char *ctr, unsigned char *buffer)
-{
+AES256_ECB(const unsigned char *key, const unsigned char *ctr, unsigned char *buffer) {
     EVP_CIPHER_CTX *ctx;
 
     int len;
@@ -151,107 +150,18 @@ AES256_ECB(unsigned char *key, unsigned char *ctr, unsigned char *buffer)
     EVP_CIPHER_CTX_free(ctx);
 }
 
-inline static lean_obj_res lean_mk_pair(lean_obj_arg x, lean_obj_arg y) {
-    lean_object * r = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(r, 0, x);
-    lean_ctor_set(r, 1, y);
-    return r;
-}
+extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
+    assert(lean_sarray_size(key_obj) == 32);
+    const uint8_t* key = lean_sarray_cptr(key_obj);
 
-static void
-my_AES256_CTR_DRBG_Update(unsigned char *provided_data,
-                       unsigned char *Key,
-                       unsigned char *V)
-{
-    unsigned char   temp[48];
-    int i;
-    int j;
+    assert(lean_sarray_size(v_obj) == 16);
+    const uint8_t* v = lean_sarray_cptr(v_obj);
 
-    for (i=0; i<3; i++) {
-        /* increment V */
-        for (j=15; j>=0; j--) {
-            if ( V[j] == 0xff )
-                V[j] = 0x00;
-            else {
-                V[j]++;
-                break;
-            }
-        }
+    lean_obj_res r_obj = lean_alloc_sarray1(1, 16);
+    uint8_t* r = lean_sarray_cptr(r_obj);
 
-        AES256_ECB(Key, V, temp+16*i);
-    }
-    if ( provided_data != NULL )
-        for (i=0; i<48; i++)
-            temp[i] ^= provided_data[i];
-    memcpy(Key, temp, 32);
-    memcpy(V, temp+32, 16);
-}
-
-extern "C" lean_obj_res lean_random_init(b_lean_obj_arg entropy_input_array) {
-    assert(lean_sarray_size(entropy_input_array) == 48);
-    unsigned char* entropy_input = lean_sarray_cptr(entropy_input_array);
-
-    lean_obj_res key_array = lean_alloc_sarray1(1, 32);
-    uint8_t* key = lean_sarray_cptr(key_array);
-
-    lean_obj_res v_array = lean_alloc_sarray1(1, 16);
-    uint8_t* v = lean_sarray_cptr(v_array);
-
-    unsigned char   seed_material[48];
-    memcpy(seed_material, entropy_input, 48);
-    memset(key, 0x00, 32);
-    memset(v, 0x00, 16);
-    my_AES256_CTR_DRBG_Update(seed_material, key, v);
-    return lean_mk_pair(key_array, v_array);
-}
-
-extern "C" lean_obj_res lean_random_bytes(b_lean_obj_arg drbg_obj, b_lean_obj_arg size) {
-    if (LEAN_UNLIKELY(!lean_is_scalar(size))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t xlen = lean_unbox(size);
-
-    uint8_t* key_input = lean_sarray_cptr(lean_ctor_get(drbg_obj, 0));
-    lean_obj_res key_array = lean_alloc_sarray1(1, 32);
-    uint8_t* key = lean_sarray_cptr(key_array);
-    memcpy(key, key_input, 32);
-
-    uint8_t* v_input   = lean_sarray_cptr(lean_ctor_get(drbg_obj, 1));
-    lean_obj_res v_array = lean_alloc_sarray1(1, 16);
-    uint8_t* v = lean_sarray_cptr(v_array);
-    memcpy(v, v_input, 16);
-
-    lean_obj_res r = lean_alloc_sarray1(1, xlen);
-    uint8_t* x = lean_sarray_cptr(r);
-
-    unsigned char   block[16];
-    int             i = 0;
-    int j;
-
-    while ( xlen > 0 ) {
-        /* increment V */
-        for (j=15; j>=0; j--) {
-            if ( v[j] == 0xff )
-                v[j] = 0x00;
-            else {
-                v[j]++;
-                break;
-            }
-        }
-        AES256_ECB(key, v, block);
-        if ( xlen > 15 ) {
-            memcpy(x+i, block, 16);
-            i += 16;
-            xlen -= 16;
-        }
-        else {
-            memcpy(x+i, block, xlen);
-            xlen = 0;
-        }
-    }
-    my_AES256_CTR_DRBG_Update(NULL, key, v);
-
-    return lean_mk_pair(r, lean_mk_pair(key_array, v_array));
+    AES256_ECB(key, v, r);
+    return r_obj;
 }
 
 inline static lean_obj_res lean_mk_option_none(void) {
