@@ -136,20 +136,10 @@ instance : DecidableEq (BitVec n) := BitVec.decideEq
 protected def generate_lsb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run do
   let mut r : Nat := 0
 
-  for i in range 0 (n/8) do
-    let mut w : Nat := 0
-    for j in range 0 8 do
-      let b := f ⟨8*i+j, sorry⟩
-      w := if b then 1 <<< j ||| w else w
-    r := w <<< (8*i) ||| r
+  for i in range 0 n do
+    let b := f ⟨i, sorry⟩
+    r := (if b then 1 <<< i else 0) ||| r
 
-  let m := n % 8
-  if m ≠ 0 then
-    let mut w : Nat := 0
-    for j in range 0 m do
-      let b := f ⟨8*(n/8) + j, sorry⟩
-      w := if b then 1 <<< j ||| w else w
-    r := w <<< (8*(n/8)) ||| r
   ⟨r, sorry⟩
 
 protected def generate_msbb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run do

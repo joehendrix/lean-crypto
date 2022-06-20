@@ -174,6 +174,13 @@ inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
     return r;
 }
 
+inline static lean_obj_res lean_mk_pair(b_lean_obj_arg x, b_lean_obj_arg y) {
+    lean_object * r = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(r, 0, x);
+    lean_ctor_set(r, 0, y);
+    return r;
+}
+
 extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in_obj) {
     if (LEAN_UNLIKELY(!lean_is_scalar(size_obj))) {
         lean_internal_panic_out_of_memory();
@@ -213,28 +220,6 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
         store_gf(sk + i*2, irr[i]);
 
     return sk_obj;
-}
-
-/* input: p, an array of int16 */
-/* input: n, length of p */
-/* input: s, meaning that stride-2^s cswaps are performed */
-/* input: cb, the control bits */
-/* output: the result of apply the control bits to p */
-static void layer(int16_t *p, const unsigned char *cb, int s, int n) {
-  const int stride = 1 << s;
-  int index = 0;
-
-  for (int i = 0; i < n; i += stride*2) {
-    for (int j = 0; j < stride; j++) {
-      int16_t d = p[ i+j ] ^ p[ i+j+stride ];
-      int16_t m = (cb[ index >> 3 ] >> (index & 7)) & 1;
-      m = -m;
-      d &= m;
-      p[ i+j ] ^= d;
-      p[ i+j+stride ] ^= d;
-      index++;
-    }
-  }
 }
 
 /* parameters: 1 <= w <= 14; n = 2^w */
@@ -389,14 +374,11 @@ static void cbrecursion(unsigned char *out,long long pos,long long step,const in
     cbrecursion(out,pos+step,step*2,q+n/2,w-1,n/2,temp);
 }
 
-extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
-
+extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) {
     const size_t perm_count = 1 << GFBITS;
     assert(lean_array_size(pi_obj) == perm_count);
-    int16_t pi[perm_count];
-    for (size_t i = 0; i != perm_count; ++i) {
-        pi[i] = lean_unbox_uint32(lean_array_get_core(pi_obj, i));
-    }
+    gf pi[perm_count];
+    init_gf_array(pi, pi_obj);
 
     lean_obj_res out_obj = lean_alloc_sarray1(1, COND_BYTES);
     uint8_t* out = lean_sarray_cptr(out_obj);
@@ -406,35 +388,9 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
 
     int32_t temp[2*n];
     memset(out,0, COND_BYTES);
-    cbrecursion(out,0,1,pi,w,n,temp);
+    cbrecursion(out,0,1,(int16_t*)pi,w,n,temp);
 
-    // check for correctness
-
-    int16_t pi_test[n];
-    for (int i = 0; i < n; i++)
-    pi_test[i] = i;
-
-    unsigned char *ptr = out;
-    for (int i = 0; i < w; i++) {
-        layer(pi_test, ptr, i, n);
-        ptr += n >> 4;
-    }
-
-    for (int i = w-2; i >= 0; i--) {
-        layer(pi_test, ptr, i, n);
-        ptr += n >> 4;
-    }
-
-    int16_t diff = 0;
-    for (int i = 0; i < n; i++)
-        diff |= pi[i] ^ pi_test[i];
-
-    if (diff != 0) {
-        lean_dec_ref(out_obj);
-        return lean_mk_option_none();
-    }
-
-    return lean_mk_option_some(out_obj);
+    return out_obj;
 }
 
 /* input: in, a 64x64 matrix over GF(2) */

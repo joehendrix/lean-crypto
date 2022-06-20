@@ -9,10 +9,58 @@ import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
+namespace BitVec
+
+protected def generate (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run do
+  let mut r : Nat := 0
+
+  for i in range 0 n do
+    let b := f ⟨i, sorry⟩
+    r := r <<< 1 ||| (if b then 1 else 0)
+  ⟨r, sorry⟩
+
+def extractN! (a:BitVec n) (s m:Nat) : BitVec m :=
+  let e := s + m
+  let b := (a.val >>> (n - e)) &&& (1 <<< (min m (n - s)) - 1)
+  ⟨b, sorry⟩
+
+def get (a: BitVec n) (i:Nat) : Bool :=
+  if i < n then
+    (a.val >>> (n-1-i)) &&& 1 = 1
+  else
+    false
+
+end BitVec
+
+def select (c:BitVec n) (t f :Vector n α) : Vector n α :=
+  Vector.generate n (λi => if c.get i then t.get i else f.get i)
+
 def iterN (f : α → α) : Nat → α → α
 | 0, a => a
 | i+1, a => iterN f i (f a)
 
+def iterV (n:Nat) (f : β → α × β) (b:β) : Vector n α × β :=
+  let g := λ((a, b) : Array α × β) =>
+        let (v, b) := f b
+        (a.push v, b)
+  let (a, b) := iterN g n (Array.mkEmpty n, b)
+  let p : a.size = n := by admit
+  (⟨a, p⟩, b)
+
+def concatByteVec (v : Vector m (ByteVec n)) : ByteVec (m*n) :=
+  let q {i} (p : i < m*n) : i / n < m := sorry
+  let r {i} (p : i < m*n) : 0 < n := sorry
+  ByteVec.generate (m*n) (λi => (v.get ⟨i.val / n, q i.isLt⟩).get (Fin.ofNat' i.val (r i.isLt)))
+
+def concatVec (v : Vector m (Vector n α)) : Vector (m*n) α :=
+  let q {i} (p : i < m*n) : i / n < m := sorry
+  let r {i} (p : i < m*n) : 0 < n := sorry
+  Vector.generate (m*n) (λi => (v.get ⟨i.val / n, q i.isLt⟩).get (Fin.ofNat' i.val (r i.isLt)))
+
+def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × β :=
+  (λ(v,b) => (concatByteVec v, b)) (iterV m f b)
+
+/-
 def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × β :=
   let g := λ((a, b) : ByteArray × β) =>
         let (v, b) := f b
@@ -20,6 +68,7 @@ def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × �
   let (a, b) := iterN g m (ByteArray.mkEmpty (m*n), b)
   let p : a.size = m*n := by admit
   (⟨a, p⟩, b)
+-/
 
 @[extern "lean_elt_from_bytevec"]
 constant eltFromByteVec {w : @&Nat} (r : @&Nat) (v : @&(ByteVec w)) : BitVec r
@@ -231,8 +280,52 @@ constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
-@[extern "lean_controlbitsfrompermutation"]
-constant controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : Option (ByteVec cond_bytes)
+@[extern "lean_controlbitsfrompermutation2"]
+constant controlBitsFromPermutation2 (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
+
+theorem shl_plus_shl (n : Nat) : (1 <<< n + 1 <<< n) = 1 <<< (n+1) := sorry
+
+theorem shl_times_shl (m n : Nat) : (1 <<< m * 1 <<< n) = 1 <<< (m+n) := sorry
+
+def layer (pi : Vector (1 <<< gfbits) GF) (cb : BitVec (1 <<< gfbits)) (s : Fin gfbits) : Vector (1 <<< gfbits) GF :=
+  let si := s.val
+  let stride := 1 <<< si
+  let h : Vector (1 <<< (gfbits - (si+1)) * (1 <<< si + 1 <<< si)) GF = Vector (1 <<< gfbits) GF := by
+        apply congrFun
+        apply congrArg
+        simp only [shl_plus_shl, shl_times_shl, Nat.sub_add_cancel s.isLt]
+  cast h $
+    concatVec $ Vector.generate (1 <<< (gfbits - (s+1))) λk =>
+      let i := stride*k.val
+      let c  : BitVec (1 <<< si) := cb.extractN! i stride
+      let p1 : Vector (1 <<< si) GF := pi.extractN! (2*i) stride
+      let p2 : Vector (1 <<< si) GF := pi.extractN! (2*i+stride) stride
+      select c p2 p1 ++ select c p1 p2
+
+def testPerm (out : ByteVec cond_bytes) :  Vector (1 <<< gfbits) GF := Id.run do
+  let w  := gfbits
+  let n  := 1 <<< gfbits
+  let n4 := n >>> 4
+  let out :=
+        Vector.generate (2*w-1) λi =>
+          let cb := out.extractN (n4 * i) n4
+          BitVec.generate (1 <<< gfbits) λi => (cb.get! (i.val/8)).testBit (i.val%8)
+  let mut pi := Vector.generate n (λi => (OfNat.ofNat i.val : GF))
+  for i in range 0 w do
+    let cb := out.get! i
+    pi := layer pi cb ⟨i, sorry⟩
+  for j in range 0 (w-1) do
+    let cb := out.get! (w+j)
+    let i := (w - 2) - j
+    pi := layer pi cb ⟨i, sorry⟩
+  pure pi
+
+def controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : Option (ByteVec cond_bytes) :=
+  let out := controlBitsFromPermutation2 pi
+  if pi ≠ testPerm out then
+    none
+  else
+    some out
 
 structure SecretKey where
   seed : ByteVec 32
