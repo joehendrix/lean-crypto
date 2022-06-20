@@ -11,6 +11,16 @@ protected def get (x:ByteVec n) (i:Fin n) : UInt8 := x.data.get ⟨i.val, Eq.sub
 
 protected def get! (x:ByteVec n) (i:Nat) : UInt8 := x.data.get! i
 
+#print ByteArray.size_set!
+
+def set! (v : ByteVec n) (i : Nat) (e : UInt8) : ByteVec n :=
+  { data := v.data.set! i e,
+    size_proof := Eq.trans (ByteArray.size_set! v.data i e) v.size_proof }
+
+def add! (v : ByteVec n) (i : Nat) (e : UInt8) : ByteVec n :=
+  { data := v.data.set! i (v.data.get! i + e),
+    size_proof := Eq.trans (ByteArray.size_set! v.data i _) v.size_proof }
+
 def push {n:Nat} (b:UInt8) : ByteVec n → ByteVec (n+1)
 | ⟨d, p⟩ => ⟨d.push b, by simp [ByteArray.size_push, p]⟩
 
@@ -51,7 +61,9 @@ instance (m n : Nat) : HAppend (ByteVec m) (ByteVec n) (ByteVec (m+n)) where
 def extractN {n:Nat} (a:ByteVec n) (s m:Nat) : ByteVec m :=
   ⟨a.data.extractN s m, a.data.size_extractN s m⟩
 
-def drop {n:Nat} (a:ByteVec n) (m:Nat) : ByteVec (n-m) := a.extractN m (n-m)
+def take (a : ByteVec n) (m : Nat) : ByteVec m := a.extractN 0 m
+
+def drop (a : ByteVec n) (m : Nat) : ByteVec (n-m) := a.extractN m (n-m)
 
 def takeFromEnd {n:Nat} (a:ByteVec n) (m:Nat) : ByteVec m := a.extractN (n-m) m
 

@@ -4,24 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 extern "C" {
-#include "crypto_kem.h"
-#include "operations.h"
-
-#include "controlbits.h"
-#include "randombytes.h"
 #include "crypto_hash.h"
-#include "encrypt.h"
-#include "decrypt.h"
+#include "gf.h"
+#include "int32_sort.h"
 #include "params.h"
-#include "sk_gen.h"
-#include "uint64_sort.h"
 #include "util.h"
-#include "transpose.h"
 
 #include <openssl/conf.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
-
 }
 #include <gmp.h>
 
@@ -141,8 +132,7 @@ static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x
       buffer - a 128-bit ciphertext value
 */
 static void
-AES256_ECB(unsigned char *key, unsigned char *ctr, unsigned char *buffer)
-{
+AES256_ECB(const unsigned char *key, const unsigned char *ctr, unsigned char *buffer) {
     EVP_CIPHER_CTX *ctx;
 
     int len;
@@ -160,107 +150,18 @@ AES256_ECB(unsigned char *key, unsigned char *ctr, unsigned char *buffer)
     EVP_CIPHER_CTX_free(ctx);
 }
 
-inline static lean_obj_res lean_mk_pair(lean_obj_arg x, lean_obj_arg y) {
-    lean_object * r = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(r, 0, x);
-    lean_ctor_set(r, 1, y);
-    return r;
-}
+extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
+    assert(lean_sarray_size(key_obj) == 32);
+    const uint8_t* key = lean_sarray_cptr(key_obj);
 
-static void
-my_AES256_CTR_DRBG_Update(unsigned char *provided_data,
-                       unsigned char *Key,
-                       unsigned char *V)
-{
-    unsigned char   temp[48];
-    int i;
-    int j;
+    assert(lean_sarray_size(v_obj) == 16);
+    const uint8_t* v = lean_sarray_cptr(v_obj);
 
-    for (i=0; i<3; i++) {
-        /* increment V */
-        for (j=15; j>=0; j--) {
-            if ( V[j] == 0xff )
-                V[j] = 0x00;
-            else {
-                V[j]++;
-                break;
-            }
-        }
+    lean_obj_res r_obj = lean_alloc_sarray1(1, 16);
+    uint8_t* r = lean_sarray_cptr(r_obj);
 
-        AES256_ECB(Key, V, temp+16*i);
-    }
-    if ( provided_data != NULL )
-        for (i=0; i<48; i++)
-            temp[i] ^= provided_data[i];
-    memcpy(Key, temp, 32);
-    memcpy(V, temp+32, 16);
-}
-
-extern "C" lean_obj_res lean_random_init(b_lean_obj_arg entropy_input_array) {
-    assert(lean_sarray_size(entropy_input_array) == 48);
-    unsigned char* entropy_input = lean_sarray_cptr(entropy_input_array);
-
-    lean_obj_res key_array = lean_alloc_sarray1(1, 32);
-    uint8_t* key = lean_sarray_cptr(key_array);
-
-    lean_obj_res v_array = lean_alloc_sarray1(1, 16);
-    uint8_t* v = lean_sarray_cptr(v_array);
-
-    unsigned char   seed_material[48];
-    memcpy(seed_material, entropy_input, 48);
-    memset(key, 0x00, 32);
-    memset(v, 0x00, 16);
-    my_AES256_CTR_DRBG_Update(seed_material, key, v);
-    return lean_mk_pair(key_array, v_array);
-}
-
-extern "C" lean_obj_res lean_random_bytes(b_lean_obj_arg drbg_obj, b_lean_obj_arg size) {
-    if (LEAN_UNLIKELY(!lean_is_scalar(size))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t xlen = lean_unbox(size);
-
-    uint8_t* key_input = lean_sarray_cptr(lean_ctor_get(drbg_obj, 0));
-    lean_obj_res key_array = lean_alloc_sarray1(1, 32);
-    uint8_t* key = lean_sarray_cptr(key_array);
-    memcpy(key, key_input, 32);
-
-    uint8_t* v_input   = lean_sarray_cptr(lean_ctor_get(drbg_obj, 1));
-    lean_obj_res v_array = lean_alloc_sarray1(1, 16);
-    uint8_t* v = lean_sarray_cptr(v_array);
-    memcpy(v, v_input, 16);
-
-    lean_obj_res r = lean_alloc_sarray1(1, xlen);
-    uint8_t* x = lean_sarray_cptr(r);
-
-    unsigned char   block[16];
-    int             i = 0;
-    int j;
-
-    while ( xlen > 0 ) {
-        /* increment V */
-        for (j=15; j>=0; j--) {
-            if ( v[j] == 0xff )
-                v[j] = 0x00;
-            else {
-                v[j]++;
-                break;
-            }
-        }
-        AES256_ECB(key, v, block);
-        if ( xlen > 15 ) {
-            memcpy(x+i, block, 16);
-            i += 16;
-            xlen -= 16;
-        }
-        else {
-            memcpy(x+i, block, xlen);
-            xlen = 0;
-        }
-    }
-    my_AES256_CTR_DRBG_Update(NULL, key, v);
-
-    return lean_mk_pair(r, lean_mk_pair(key_array, v_array));
+    AES256_ECB(key, v, r);
+    return r_obj;
 }
 
 inline static lean_obj_res lean_mk_option_none(void) {
@@ -270,6 +171,13 @@ inline static lean_obj_res lean_mk_option_none(void) {
 inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
     lean_object * r = lean_alloc_ctor(1, 1, 0);
     lean_ctor_set(r, 0, v);
+    return r;
+}
+
+inline static lean_obj_res lean_mk_pair(b_lean_obj_arg x, b_lean_obj_arg y) {
+    lean_object * r = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(r, 0, x);
+    lean_ctor_set(r, 0, y);
     return r;
 }
 
@@ -314,115 +222,227 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
     return sk_obj;
 }
 
-extern "C" lean_obj_res lean_controlbitsfrompermutation(b_lean_obj_arg pi_obj) {
+/* parameters: 1 <= w <= 14; n = 2^w */
+/* input: permutation pi of {0,1,...,n-1} */
+/* output: (2m-1)n/2 control bits at positions pos,pos+step,... */
+/* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
+/* caller must 0-initialize positions first */
+/* temp must have space for int32[2*n] */
+static void cbrecursion(unsigned char *out,long long pos,long long step,const int16_t *pi,long long w,long long n,int32_t *temp) {
+    // A refers to the first n elements in temp.
+    int32_t* A = temp;
+    // B refers tot he second n elemnts in temp.
+    int32_t* B = temp+n;
 
-    const size_t perm_count = 1 << GFBITS;
-    assert(lean_array_size(pi_obj) == perm_count);
-    int16_t pi[perm_count];
-    for (size_t i = 0; i != perm_count; ++i) {
-        pi[i] = lean_unbox_uint32(lean_array_get_core(pi_obj, i));
+
+    if (w == 1) {
+        out[pos>>3] ^= pi[0]<<(pos&7);
+        return;
     }
 
-    lean_obj_res sk_obj = lean_alloc_sarray1(1, COND_BYTES);
-    uint8_t* sk = lean_sarray_cptr(sk_obj);
+    for (long long x = 0;x < n;++x)
+        A[x] = ((pi[x]^1)<<16)|pi[x^1];
 
-    controlbitsfrompermutation(sk, pi, GFBITS, 1 << GFBITS);
 
-    return sk_obj;
+    int32_sort(A,n); /* A = (id<<16)+pibar */
+
+    for (long long x = 0; x < n; ++x) {
+        int32_t Ax = A[x];
+        int32_t px = Ax&0xffff;
+        int32_t cx = px;
+        if (x < cx) cx = x;
+        B[x] = (px<<16)|cx;
+    }
+    /* B = (p<<16)+c */
+
+    for (long long x = 0; x < n; ++x)
+        A[x] = (A[x]<<16)|x; /* A = (pibar<<16)+id */
+    int32_sort(A,n); /* A = (id<<16)+pibar^-1 */
+
+    for (long long x = 0; x < n; ++x)
+        A[x] = (A[x]<<16)+(B[x]>>16); /* A = (pibar^(-1)<<16)+pibar */
+    int32_sort(A,n); /* A = (id<<16)+pibar^2 */
+
+    if (w <= 10) {
+        for (long long x = 0;x < n;++x)
+            B[x] = ((A[x]&0xffff)<<10)|(B[x]&0x3ff);
+
+        for (long long i = 1;i < w-1;++i) {
+            /* B = (p<<10)+c */
+
+            for (long long x = 0; x < n; ++x)
+                A[x] = ((B[x]&~0x3ff)<<6)|x; /* A = (p<<16)+id */
+            int32_sort(A,n); /* A = (id<<16)+p^{-1} */
+
+            for (long long x = 0;x < n;++x)
+                A[x] = (A[x]<<20)|B[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
+            int32_sort(A,n); /* A = (id<<20)+(pp<<10)+cp */
+
+            for (long long x = 0; x < n; ++x) {
+                int32_t ppcpx = A[x]&0xfffff;
+                int32_t ppcx = (A[x]&0xffc00)|(B[x]&0x3ff);
+                if (ppcpx < ppcx) ppcx = ppcpx;
+                B[x] = ppcx;
+            }
+        }
+        for (long long x = 0;x < n;++x)
+            B[x] &= 0x3ff;
+    } else {
+        for (long long x = 0;x < n;++x)
+            B[x] = (A[x]<<16)|(B[x]&0xffff);
+
+        for (long long i = 1;i < w-1;++i) {
+            /* B = (p<<16)+c */
+
+            for (long long x = 0;x < n;++x)
+                A[x] = (B[x]&~0xffff)|x;
+            int32_sort(A,n); /* A = (id<<16)+p^(-1) */
+
+            for (long long x = 0;x < n;++x)
+                A[x] = (A[x]<<16)|(B[x]&0xffff);
+            /* A = p^(-1)<<16+c */
+
+            if (i < w-2) {
+                for (long long x = 0;x < n;++x)
+                    B[x] = (A[x]&~0xffff)|(B[x]>>16);
+                /* B = (p^(-1)<<16)+p */
+                int32_sort(B,n); /* B = (id<<16)+p^(-2) */
+                for (long long x = 0; x < n; ++x)
+                    B[x] = (B[x]<<16)|(A[x]&0xffff);
+                /* B = (p^(-2)<<16)+c */
+            }
+
+            int32_sort(A,n);
+            /* A = id<<16+cp */
+            for (long long x = 0;x < n;++x) {
+                int32_t cpx = (B[x]&~0xffff)|(A[x]&0xffff);
+                if (cpx < B[x]) B[x] = cpx;
+            }
+        }
+        for (long long x = 0;x < n;++x) B[x] &= 0xffff;
+    }
+
+    for (long long x = 0;x < n;++x) A[x] = (((int32_t)pi[x])<<16)+x;
+    int32_sort(A,n); /* A = (id<<16)+pi^(-1) */
+
+    for (long long j = 0;j < n/2;++j) {
+        long long x = 2*j;
+        int32_t fj = B[x]&1; /* f[j] */
+        int32_t Fx = x+fj; /* F[x] */
+        int32_t Fx1 = Fx^1; /* F[x+1] */
+
+        out[pos>>3] ^= fj<<(pos&7);
+        pos += step;
+
+        B[x] = (A[x]<<16)|Fx;
+        B[x+1] = (A[x+1]<<16)|Fx1;
+    }
+    /* B = (pi^(-1)<<16)+F */
+    int32_sort(B,n); /* B = (id<<16)+F(pi) */
+
+    pos += (2*w-3)*step*(n/2);
+
+    for (long long k = 0;k < n/2;++k) {
+        long long y = 2*k;
+        int32_t lk = B[y]&1; /* l[k] */
+        int32_t Ly = y+lk; /* L[y] */
+        int32_t Ly1 = Ly^1; /* L[y+1] */
+
+        out[pos>>3] ^= lk<<(pos&7);
+        pos += step;
+
+        A[y] = (Ly<<16)|(B[y]&0xffff);
+        A[y+1] = (Ly1<<16)|(B[y+1]&0xffff);
+    }
+    /* A = (L<<16)+F(pi) */
+
+    int32_sort(A,n); /* A = (id<<16)+F(pi(L)) = (id<<16)+M */
+
+    // We will only need n elements in temp in recursive calls (instead of 2*n)
+    // and we no longer need B, so we use it for storing new pi value.
+    // q has n int16_t elements, so it only need n/2 int32_t elements from B.
+    /* q can start anywhere between temp+n and temp+n+n/2 */
+    int16_t* q = (int16_t *) (B);
+
+    pos -= (2*w-2)*step*(n/2);
+    for (long long j = 0;j < n/2;++j) {
+        q[j] = (A[2*j]&0xffff)>>1;
+        q[j+n/2] = (A[2*j+1]&0xffff)>>1;
+    }
+
+    cbrecursion(out,pos,step*2,q,w-1,n/2,temp);
+    cbrecursion(out,pos+step,step*2,q+n/2,w-1,n/2,temp);
 }
 
-extern "C" gf bitrev(gf a);
+extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) {
+    const size_t perm_count = 1 << GFBITS;
+    assert(lean_array_size(pi_obj) == perm_count);
+    gf pi[perm_count];
+    init_gf_array(pi, pi_obj);
 
-#define min(a, b) ((a < b) ? a : b)
+    lean_obj_res out_obj = lean_alloc_sarray1(1, COND_BYTES);
+    uint8_t* out = lean_sarray_cptr(out_obj);
 
-/* one layer of the benes network */
-static void layer(uint64_t * data, uint64_t * bits, int lgs) {
-	int i, j, s;
+    long long w = GFBITS;
+    long long n = 1 << GFBITS;
 
-	uint64_t d;
+    int32_t temp[2*n];
+    memset(out,0, COND_BYTES);
+    cbrecursion(out,0,1,(int16_t*)pi,w,n,temp);
 
-	s = 1 << lgs;
+    return out_obj;
+}
 
-	for (i = 0; i < 64; i += s*2)
-	for (j = i; j < i+s; j++)
+/* input: in, a 64x64 matrix over GF(2) */
+/* output: out, transpose of in */
+static
+void my_transpose_64x64(uint64_t * out, uint64_t * in)
+{
+	int i, j, s, d;
+
+	uint64_t x, y;
+	uint64_t masks[6][2] = {
+	                        {0x5555555555555555, 0xAAAAAAAAAAAAAAAA},
+	                        {0x3333333333333333, 0xCCCCCCCCCCCCCCCC},
+	                        {0x0F0F0F0F0F0F0F0F, 0xF0F0F0F0F0F0F0F0},
+	                        {0x00FF00FF00FF00FF, 0xFF00FF00FF00FF00},
+	                        {0x0000FFFF0000FFFF, 0xFFFF0000FFFF0000},
+	                        {0x00000000FFFFFFFF, 0xFFFFFFFF00000000}
+	                       };
+
+	for (i = 0; i < 64; i++)
+		out[i] = in[i];
+
+	for (d = 5; d >= 0; d--)
 	{
+		s = 1 << d;
 
-		d = (data[j+0] ^ data[j+s]);
-		d &= (*bits++);
-		data[j+0] ^= d;
-		data[j+s] ^= d;
+		for (i = 0; i < 64; i += s*2)
+		for (j = i; j < i+s; j++)
+		{
+			x = (out[j] & masks[d][0]) | ((out[j+s] & masks[d][0]) << s);
+			y = ((out[j] & masks[d][1]) >> s) | (out[j+s] & masks[d][1]);
+
+			out[j+0] = x;
+			out[j+s] = y;
+		}
 	}
 }
 
-/* input: r, sequence of bits to be permuted */
-/*        bits, condition bits of the Benes network */
-/*        rev, 0 for normal application; !0 for inverse */
-/* output: r, permuted bits */
-void my_apply_benes0(unsigned char * r2, const unsigned char * bits) {
-
-
+extern "C" lean_obj_res lean_transpose64(b_lean_obj_arg a_obj) {
+    assert(lean_array_size(a_obj) == 64);
 	uint64_t bs[64];
 	for (int i = 0; i < 64; i++) {
-		bs[i] = load8(r2 + i*8);
+        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
 	}
 
+	my_transpose_64x64(bs, bs);
 
-    int inc = 256;
-	const unsigned char *cond_ptr = bits;
-
-	transpose_64x64(bs, bs);
-
-	uint64_t cond[64];
-	for (int low = 0; low <= 5; low++) {
-		for (int i = 0; i < 64; i++)
-            cond[i] = load4(cond_ptr + i*4);
-		transpose_64x64(cond, cond);
-		layer(bs, cond, low);
-		cond_ptr += inc;
-	}
-
-	transpose_64x64(bs, bs);
-
-	for (int low = 0; low <= 5; low++) {
-		for (int i = 0; i < 32; i++)
-            cond[i] = load8(cond_ptr + i*8);
-		layer(bs, cond, low);
-		cond_ptr += inc;
-	}
-	for (int low = 4; low >= 0; low--) {
-		for (int i = 0; i < 32; i++)
-            cond[i] = load8(cond_ptr + i*8);
-		layer(bs, cond, low);
-		cond_ptr += inc;
-	}
-
-	transpose_64x64(bs, bs);
-
-	for (int low = 5; low >= 0; low--) {
-		for (int i = 0; i < 64; i++)
-            cond[i] = load4(cond_ptr + i*4);
-		transpose_64x64(cond, cond);
-		layer(bs, cond, low);
-		cond_ptr += inc;
-	}
-
-	transpose_64x64(bs, bs);
-
+    lean_obj_res r_obj = lean_alloc_array(64, 64);
 	for (int i = 0; i < 64; i++) {
-		store8(r2 + i*8, bs[i]);
+        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
 	}
-}
-
-extern "C" lean_obj_res lean_apply_benes0(b_lean_obj_arg r_obj, b_lean_obj_arg c_obj) {
-    assert(lean_sarray_size(c_obj) == COND_BYTES);
-    const uint8_t* c = lean_sarray_cptr(c_obj);
-
-    unsigned char r[(1 << GFBITS)/8];
-    nat_export_to_bytes((1 << GFBITS)/8, r, r_obj);
-
-	my_apply_benes0(r, c);
-
-    return nat_import_from_bytes((1 << GFBITS)/8, r);
+    return r_obj;
 }
 
 extern "C" lean_obj_res lean_elt_from_bytevec(b_lean_obj_arg w_obj, b_lean_obj_arg r_obj, b_lean_obj_arg x_obj) {

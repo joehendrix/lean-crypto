@@ -36,6 +36,10 @@ def sub! {n:Nat} {α:Type _} [Sub α] (v:Vector n α) (i: Nat) (e:α) : Vector n
   let h : Inhabited α := ⟨e⟩
   { data := v.data.set! i (v.data.get! i - e), size_proof := sorry }
 
+def xor! {n:Nat} {α:Type _} [Xor α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
+  let h : Inhabited α := ⟨e⟩
+  { data := v.data.set! i (v.data.get! i ^^^ e), size_proof := sorry }
+
 protected
 def replicate {α : Type _} (n:Nat) (d:α): Vector n α  := Vector.generate n (λi => d)
 
@@ -74,5 +78,31 @@ def push (v:Vector n α) (x : α) : Vector (n+1) α :=
   let pr : (v.data.push x).size = n + 1 := by
         simp only [Array.size_push, v.size_proof]
   ⟨v.data.push x, pr⟩
+
+protected
+def append (x : Vector m α) (y : Vector n α) : Vector (m+n) α :=
+  let p : (x.data ++ y.data).size = (m+n) := by
+        simp only [Array.size_append, x.size_proof, y.size_proof]
+  ⟨x.data ++ y.data, p⟩
+
+instance : HAppend (Vector m α) (Vector n α) (Vector (m+n) α) where
+  hAppend := Vector.append
+
+def extractN! [Inhabited α] (a : Vector n α) (s m:Nat) : Vector m α :=
+  let b := a.data.extract s (s+m)
+  let e := Array.generate (m - b.size) (λ_ => default)
+  let pr : (b ++ e).size = m := by
+        simp [Array.size_append, Array.size_generate]
+        have p : min (s + m) (Array.size a.data) - s ≤ m := by
+              apply Nat.sub_le_of_le_add
+              simp only [Nat.add_comm s m, min]
+              cases Decidable.em (m + s ≤ a.data.size) with
+              | inl h =>
+                simp [h]
+              | inr h =>
+                simp [h]
+                exact Nat.le_of_lt (Nat.gt_of_not_le h)
+        simp [Nat.add_sub_of_le p]
+  ⟨b ++ e, pr⟩
 
 end Vector
