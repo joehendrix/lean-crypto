@@ -42,7 +42,7 @@ def polyMul (a : BitVec w) (b : BitVec v) : BitVec (w+v) :=
   -- fold over the bits of b starting at MSB
   let ret : BitVec wOut := List.range v |>.foldr (init := 0) fun i acc =>
     let acc' := acc <<< 1
-    if b.lsb_get! i then acc' ^^^ a else acc'
+    if b.lsb_get! i then polyAdd acc' a else acc'
   ret
 
 /-- Modulo operation in GF(2)[x] translated from Cryptol reference.
