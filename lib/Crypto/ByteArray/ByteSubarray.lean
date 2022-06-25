@@ -9,7 +9,7 @@ structure ByteSubarray where
 
 namespace ByteSubarray
 
-protected constant forIn {β : Type v} {m : Type v → Type w} [Monad m] (s : ByteSubarray) (b : β) (f : UInt8 → β → m (ForInStep β)) : m β :=
+protected def forIn {β : Type v} {m : Type v → Type w} [Monad m] (s : ByteSubarray) (b : β) (f : UInt8 → β → m (ForInStep β)) : m β :=
   let rec loop (n i : Nat) (p : i + n = s.stop) (b : β) : m β := do
     match n, p with
     | 0,   _ => pure b
