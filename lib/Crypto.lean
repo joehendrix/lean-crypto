@@ -71,13 +71,13 @@ def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × �
 -/
 
 @[extern "lean_elt_from_bytevec"]
-constant eltFromByteVec {w : @&Nat} (r : @&Nat) (v : @&(ByteVec w)) : BitVec r
+opaque eltFromByteVec {w : @&Nat} (r : @&Nat) (v : @&(ByteVec w)) : BitVec r
 
 @[extern "lean_elt_to_bytevec"]
-constant bitvecToByteVec_msbb { r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
+opaque bitvecToByteVec_msbb { r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
 
 @[extern "lean_nat_to_bytevec_lsb"]
-constant bitvecToByteVec_lsb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
+opaque bitvecToByteVec_lsb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w
 
 
 def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
@@ -106,7 +106,7 @@ def tryN {α:Type _ } (f:DRBG → Option α × DRBG) : DRBG → Nat → Option �
 @[reducible]
 def Seed := ByteVec 48
 
-constant incrementV (v : ByteVec 16) : ByteVec 16 := Id.run do
+opaque incrementV (v : ByteVec 16) : ByteVec 16 := Id.run do
   let mut v := v
   for i in range 0 15 do
     let j := 15 - i
@@ -119,13 +119,13 @@ constant incrementV (v : ByteVec 16) : ByteVec 16 := Id.run do
   pure v
 
 @[extern "lean_AES256_ECB"]
-constant aes256Ecb (key: @&ByteVec 32) (v: @&ByteVec 16) : ByteVec 16
+opaque aes256Ecb (key: @&ByteVec 32) (v: @&ByteVec 16) : ByteVec 16
 
-constant aes256CtrDrbgUpdate (key : ByteVec 32) (v0 : ByteVec 16) : ByteVec 48 × ByteVec 16 :=
+opaque aes256CtrDrbgUpdate (key : ByteVec 32) (v0 : ByteVec 16) : ByteVec 48 × ByteVec 16 :=
   let f := λv => let v := incrementV v; (aes256Ecb key v, v)
   concatIterV 3 f v0
 
-constant randombytesInit (s : Seed) : DRBG :=
+opaque randombytesInit (s : Seed) : DRBG :=
   let key := ByteVec.generate 32 (λ_ => 0)
   let v   := ByteVec.generate 16 (λ_ => 0)
   let (b, _) := aes256CtrDrbgUpdate key v
@@ -151,7 +151,7 @@ theorem randomBytes3_size (key) (v) (a) (n:Nat)
     : (randombytes3 key v a n).1.size = n := by
   admit
 
-constant randombytes (rbg : DRBG) (n : Nat) : ByteVec n × DRBG :=
+opaque randombytes (rbg : DRBG) (n : Nat) : ByteVec n × DRBG :=
   let key := rbg.key
   let v := rbg.v
   let p := randombytes3 key v (ByteArray.mkEmpty n) n
@@ -165,7 +165,7 @@ def initKeypairSeedPrefix : ByteVec 1 := #v[64]
 def initKeypairSeed (v:ByteVec 32) : ByteVec 33 := initKeypairSeedPrefix ++ v
 
 @[extern "lean_shake256"]
-constant shake (w:Nat) (input: ByteArray) : ByteVec w
+opaque shake (w:Nat) (input: ByteArray) : ByteVec w
 
 def cryptoHash32b (b:ByteArray) : ByteVec 32 := shake 32 b
 
@@ -229,10 +229,10 @@ instance : Inhabited GF := ⟨⟨0, sorry⟩⟩
 protected def xor  (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
 
 @[extern "lean_gf_mul"]
-protected constant mul (x y : GF) : GF
+protected opaque mul (x y : GF) : GF
 
 @[extern "lean_gf_frac"]
-protected constant frac (x y : GF) : GF
+protected opaque frac (x y : GF) : GF
 
 instance : Xor GF := ⟨GF.xor⟩
 instance : Add GF := ⟨GF.xor⟩
@@ -264,7 +264,7 @@ def bitrev (x:GF) : GF :=
 end GF
 
 @[extern "lean_gf_inv"]
-constant gf_inv : GF -> GF
+opaque gf_inv : GF -> GF
 
 
 def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
@@ -276,12 +276,12 @@ def loadGfArray {n:Nat} (r: ByteVec (2*n)) : Vector n GF :=
   Vector.generate n (λi => loadGf r (2*i.val))
 
 @[extern "lean_store_gf"]
-constant store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
+opaque store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
 @[extern "lean_controlbitsfrompermutation2"]
-constant controlBitsFromPermutation2 (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
+opaque controlBitsFromPermutation2 (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
 
 theorem shl_plus_shl (n : Nat) : (1 <<< n + 1 <<< n) = 1 <<< (n+1) := sorry
 
@@ -636,7 +636,7 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
 @[extern "lean_transpose64"]
-constant tranpose64 (a : @&(Vector 64 UInt64)) : Vector 64 UInt64
+opaque tranpose64 (a : @&(Vector 64 UInt64)) : Vector 64 UInt64
 
 def load4_64
   (c : ByteVec 256)
