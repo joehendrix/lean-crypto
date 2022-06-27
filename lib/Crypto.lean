@@ -281,7 +281,7 @@ opaque store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
 @[extern "lean_controlbitsfrompermutation2"]
-opaque controlBitsFromPermutation2 (pi : Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
+opaque controlBitsFromPermutation2 (pi : @&Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
 
 theorem shl_plus_shl (n : Nat) : (1 <<< n + 1 <<< n) = 1 <<< (n+1) := sorry
 
