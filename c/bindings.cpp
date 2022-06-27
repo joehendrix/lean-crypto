@@ -9,10 +9,6 @@ extern "C" {
 #include "int32_sort.h"
 #include "params.h"
 #include "util.h"
-
-#include <openssl/conf.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
 }
 #include <gmp.h>
 
@@ -54,13 +50,6 @@ extern "C" uint8_t lean_byte_array_decide_eq(b_lean_obj_arg x, b_lean_obj_arg y)
 static inline
 lean_obj_res lean_alloc_sarray1(unsigned elem_size, size_t size) {
     return lean_alloc_sarray(elem_size, size, size);
-}
-
-static
-void handleErrors(void)
-{
-    ERR_print_errors_fp(stderr);
-    abort();
 }
 
 extern "C" LEAN_EXPORT lean_object * lean_alloc_mpz(mpz_t v);
@@ -125,43 +114,53 @@ static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x
     mpz_clear(xz);
 }
 
-/*
-   Use whatever AES implementation you have. This uses AES from openSSL library
-      key - 256-bit AES key
-      ctr - a 128-bit plaintext value
-      buffer - a 128-bit ciphertext value
-*/
-static void
-AES256_ECB(const unsigned char *key, const unsigned char *ctr, unsigned char *buffer) {
-    EVP_CIPHER_CTX *ctx;
+# define AES_MAXNR 14
 
-    int len;
+/* This should be a hidden type, but EVP requires that the size be known */
+struct aes_key_st {
+    unsigned int rd_key[4 * (AES_MAXNR + 1)];
+    int rounds;
+};
 
-    /* Create and initialise the context */
-    if(!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
+typedef struct aes_key_st AES_KEY;
 
-    if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_ecb(), NULL, key, NULL))
-        handleErrors();
+extern "C" {
+int aesni_set_encrypt_key(const unsigned char *userKey, int bits, AES_KEY *key);
 
-    if(1 != EVP_EncryptUpdate(ctx, buffer, &len, ctr, 16))
-        handleErrors();
+void aesni_ecb_encrypt(const unsigned char *in,
+                       unsigned char *out,
+                       size_t length, const AES_KEY *key, int enc);
 
-    /* Clean up */
-    EVP_CIPHER_CTX_free(ctx);
+int AES_set_encrypt_key(const unsigned char *userKey, const int bits,
+                        AES_KEY *key);
+
+void AES_ecb_encrypt(const unsigned char *in, unsigned char *out,
+                     const AES_KEY *key, const int enc);
+
 }
+
+extern "C"
+void AES_encrypt(const unsigned char *in, unsigned char *out,
+                 const AES_KEY *key);
 
 extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
     assert(lean_sarray_size(key_obj) == 32);
     const uint8_t* key = lean_sarray_cptr(key_obj);
 
     assert(lean_sarray_size(v_obj) == 16);
-    const uint8_t* v = lean_sarray_cptr(v_obj);
+    const uint8_t* ctr = lean_sarray_cptr(v_obj);
 
-    lean_obj_res r_obj = lean_alloc_sarray1(1, 16);
-    uint8_t* r = lean_sarray_cptr(r_obj);
+    lean_obj_res buffer_obj = lean_alloc_sarray1(1, 16);
+    uint8_t* buffer = lean_sarray_cptr(buffer_obj);
+    assert(key);
 
-    AES256_ECB(key, v, r);
-    return r_obj;
+    AES_KEY ks;
+    memset(&ks, 0, sizeof(AES_KEY));
+    int ret = AES_set_encrypt_key(key, 256, &ks);
+    assert(ret >= 0);
+    AES_encrypt(ctr, buffer, &ks);
+
+    return buffer_obj;
 }
 
 inline static lean_obj_res lean_mk_option_none(void) {
