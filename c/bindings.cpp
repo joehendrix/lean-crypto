@@ -118,11 +118,7 @@ static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x
 
 /* This should be a hidden type, but EVP requires that the size be known */
 struct aes_key_st {
-# ifdef AES_LONG
-    unsigned long rd_key[4 * (AES_MAXNR + 1)];
-# else
     unsigned int rd_key[4 * (AES_MAXNR + 1)];
-# endif
     int rounds;
 };
 
@@ -134,9 +130,18 @@ int aesni_set_encrypt_key(const unsigned char *userKey, int bits, AES_KEY *key);
 void aesni_ecb_encrypt(const unsigned char *in,
                        unsigned char *out,
                        size_t length, const AES_KEY *key, int enc);
+
+int AES_set_encrypt_key(const unsigned char *userKey, const int bits,
+                        AES_KEY *key);
+
+void AES_ecb_encrypt(const unsigned char *in, unsigned char *out,
+                     const AES_KEY *key, const int enc);
+
 }
 
-
+extern "C"
+void AES_encrypt(const unsigned char *in, unsigned char *out,
+                 const AES_KEY *key);
 
 extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
     assert(lean_sarray_size(key_obj) == 32);
@@ -147,15 +152,13 @@ extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v
 
     lean_obj_res buffer_obj = lean_alloc_sarray1(1, 16);
     uint8_t* buffer = lean_sarray_cptr(buffer_obj);
-
     assert(key);
 
     AES_KEY ks;
     memset(&ks, 0, sizeof(AES_KEY));
-    int ret = aesni_set_encrypt_key(key, 256, &ks);
+    int ret = AES_set_encrypt_key(key, 256, &ks);
     assert(ret >= 0);
-
-    aesni_ecb_encrypt(ctr, buffer, 16, &ks, 1);
+    AES_encrypt(ctr, buffer, &ks);
 
     return buffer_obj;
 }

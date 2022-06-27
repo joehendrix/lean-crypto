@@ -84,10 +84,8 @@ def opensslTarget (pkgDir : FilePath) (srcPath : FilePath) (extraOps : optParam 
 
 def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
   let base : FilePath := "openssl"
-  #[ opensslTarget pkgDir $ base / "crypto" / "cryptlib.c",
-     opensslTarget pkgDir $ base / "crypto" / "ctype.c",
-     opensslTarget pkgDir $ base / "crypto" / "x86_64cpuid.s",
-     opensslTarget pkgDir $ base / "crypto" / "aes" / "aesni-x86_64.s"
+  #[
+     opensslTarget pkgDir $ base / "crypto" / "aes" / "aes_core.c"
    ]
 
 extern_lib libcrypto :=
