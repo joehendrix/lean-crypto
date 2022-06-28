@@ -6,7 +6,6 @@
 extern "C" {
 #include "crypto_hash.h"
 #include "gf.h"
-#include "int32_sort.h"
 #include "params.h"
 #include "util.h"
 }
@@ -227,7 +226,7 @@ extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
 /* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
 /* caller must 0-initialize positions first */
 /* temp must have space for int32[2*n] */
-static void cbf(unsigned char *out, int16_t* q, int pos, const int16_t *pi, int w) {
+static void cbf(bool* bit, bool* put2, int16_t* q, const int16_t *pi, int w) {
     const int n = 1 << w;
     const int step = 1 << (GFBITS - w);
 
@@ -235,14 +234,18 @@ static void cbf(unsigned char *out, int16_t* q, int pos, const int16_t *pi, int 
         assert(0 <= pi[x] && pi[x] < n);
     }
 
+    int16_t pi_inv[n];
+    memset(pi_inv, -1, sizeof(int16_t) * n);
+    for (int x = 0; x < n; ++x)
+        pi_inv[pi[x]] = x;
+    for (int16_t x = 0; x < n; ++x) {
+        assert(0 <= pi_inv[x] && pi_inv[x] < n);
+    }
+
     int16_t E[n];
     memset(E, -1, sizeof(int16_t) * n);
     for (int x = 0; x < n; ++x)
-        E[pi[x]^1] = pi[x^1];
-
-    for (int16_t x = 0; x < n; ++x) {
-        assert(0 <= E[x] && E[x] < n);
-    }
+        E[x] = pi[pi_inv[x^1]^1];
 
     int16_t E_min[n];
     for (int x = 0; x < n; ++x) {
@@ -250,7 +253,6 @@ static void cbf(unsigned char *out, int16_t* q, int pos, const int16_t *pi, int 
     }
     /* B = (p<<16)+c */
 
-    bool bit[n];
     if (w <= 10) {
         int16_t B00[n];
         int16_t B10[n];
@@ -262,109 +264,77 @@ static void cbf(unsigned char *out, int16_t* q, int pos, const int16_t *pi, int 
         for (int i = 1; i < w-1; ++i) {
             /* B = (p<<10)+c */
 
-            int32_t G[n];
-            for (int x = 0; x < n; ++x)
-                G[B10[x]] = x;
-
-            int32_t A[n];
-            for (long long x = 0;x < n;++x)
-                A[G[x]] = (B10[x] << 10) | B00[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
-
-            for (long long x = 0; x < n; ++x) {
-                int32_t ppcpx = A[x]&0xfffff;
-                int32_t ppcx = (A[x]&0xffc00) | B00[x];
-                ppcx = (ppcpx < ppcx) ? ppcpx : ppcx;
-
-                B00[x] = ppcx & 0x3ff;
-                B10[x] = ppcx >> 10;
+            int16_t B00_copy[n];
+            for (int x = 0;x < n;++x)
+                B00_copy[x] = B00[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
+            for (int x = 0; x < n; ++x) {
+                if (B00_copy[B10[x]] < B00_copy[x]) {
+                    B00[x] = B00_copy[B10[x]];
+                } else {
+                    B00[x] = B00_copy[x];
+                }
             }
+
+            int16_t B10_copy[n];
+            for (int x = 0;x < n;++x)
+                B10_copy[x] = B10[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
+            for (int x = 0; x < n; ++x)
+                B10[x] = B10_copy[B10_copy[x]];
         }
-        for (int x = 0;x < n;++x)
-            bit[x] = B00[x] & 1;
+        for (int x = 0; x < n/2; ++x)
+            bit[x] = B00[2*x] & 1;
     } else {
-        int32_t B[n];
-        for (int x = 0;x < n;++x)
-            B[x] = (E[E[x]]<<16) | E_min[x];
+        int16_t B00[n];
+        int16_t B16[n];
+
+        for (int x = 0;x < n;++x) {
+            B00[x] = E_min[x];
+            B16[x] = E[E[x]];
+        }
 
         for (int i = 1;i < w-1;++i) {
             /* B = (p<<16)+c */
 
             int32_t A[n];
-            for (long long x = 0;x < n;++x)
-                A[x] = (B[x]&0xffff0000)|x;
-            int32_sort(A,n); /* A = (id<<16)+p^(-1) */
-
-            for (long long x = 0;x < n;++x)
-                A[x] = (A[x]<<16)|(B[x]&0xffff);
+            for (int x = 0;x < n;++x)
+                A[x] = B00[B16[x]];
             /* A = p^(-1)<<16+c */
 
             if (i < w-2) {
-                for (long long x = 0;x < n;++x)
-                    B[x] = (A[x]&~0xffff) | (B[x]>>16);
-                /* B = (p^(-1)<<16)+p */
-                int32_sort(B,n); /* B = (id<<16)+p^(-2) */
-                for (long long x = 0; x < n; ++x)
-                    B[x] = (B[x]<<16)|(A[x]&0xffff);
+                int32_t H[n];
+                for (int x = 0;x < n;++x)
+                    H[x] = B16[B16[x]];
+                for (int x = 0; x < n; ++x)
+                    B16[x] = H[x];
                 /* B = (p^(-2)<<16)+c */
             }
 
-            int32_sort(A,n);
             /* A = id<<16+cp */
             for (long long x = 0;x < n;++x) {
-                int32_t cpx = (B[x]&~0xffff)|(A[x]&0xffff);
-                if (cpx < B[x]) B[x] = cpx;
+                if (A[x] < B00[x]) {
+                    B00[x] = A[x];
+                }
             }
         }
 
-        for (long long x = 0;x < n;++x)
-            bit[x] = B[x] & 0x1;
-    }
-
-    int16_t pi_inv[n];
-    for (int x = 0; x != n; ++x)
-        pi_inv[pi[x]] = x;
-
-    for (int j = 0; j < n/2; ++j) {
-        int x = 2*j;
-        int32_t fj = bit[x] ? 1 : 0;
-        int pos2 = pos + step * j;
-        out[pos2>>3] ^= fj<<(pos2&7);
+        for (int x = 0; x < n/2; ++x)
+            bit[x] = B00[2*x] & 0x1;
     }
 
     int16_t C[n];
-    for (int j = 0; j < n/2; ++j) {
-        int x = 2*j;
-        if (bit[x]) {
-            C[pi_inv[x]]   = 2*j+1;
-            C[pi_inv[x+1]] = 2*j;
-        } else {
-            C[pi_inv[x]]   = 2*j;
-            C[pi_inv[x+1]] = 2*j+1;
-        }
+    for (int k = 0; k < n; ++k) {
+        C[k] = bit[pi[k]/2] ? pi[k]^1 : pi[k];
     }
 
-    for (int k = 0;k < n/2;++k) {
-        int32_t lk = C[2*k]&1; /* l[k] */
-        int pos2 = pos + (w-1) * (1 << GFBITS) + step * k;
-        out[pos2>>3] ^= lk<<(pos2&7);
+    for (int k = 0; k < n/2; ++k) {
+        put2[k] = (C[2*k]&1) == 1; /* l[k] */
     }
-
-    int16_t D[n];
-    for (int k = 0;k < n/2;++k) {
-        int32_t lk = C[2*k]&1; /* l[k] */
-        if (lk) {
-            D[2*k]   = C[2*k+1];
-            D[2*k+1] = C[2*k];
-        } else {
-            D[2*k]   = C[2*k];
-            D[2*k+1] = C[2*k+1];
-        }
-    }
-    /* D = (id<<16)+F(pi(L)) = (id<<16)+M */
 
     for (int j = 0; j < n/2; ++j) {
-        q[j] = D[2*j]>>1;
-        q[j+n/2] = D[2*j+1]>>1;
+        q[j]     = C[2*j + (C[2*j]&1 ? 1 : 0)] >> 1;
+    }
+    for (int j = 0; j < n/2; ++j) {
+        q[j+n/2] = C[2*j + (C[2*j]&1 ? 0 : 1)] >> 1;
     }
 }
 
@@ -375,24 +345,54 @@ static void cbf(unsigned char *out, int16_t* q, int pos, const int16_t *pi, int 
 /* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
 /* caller must 0-initialize positions first */
 /* temp must have space for int32[2*n] */
-static void cbrecursion(unsigned char *out, int pos0, const int16_t *pi, long long w) {
+static void cbrecursion(bool* out2, int pos0, const int16_t *pi, int w) {
+    assert(w >= 1);
     const int n = 1 << w;
-    const int step = 1 << (GFBITS - w);
+    int wk = GFBITS - w;
 
+    const int step = 1 << wk;
+    assert(pos0 < step);
 
-    long long pos = pos0 + (1 << (GFBITS - 1)) * (GFBITS - w);
     if (w == 1) {
-        out[pos>>3] ^= pi[0]<<(pos&7);
+        int pos = (1 << (GFBITS - 1)) * wk + pos0;
+        assert(!out2[pos]);
+        assert((pi[0] & ~1) == 0);
+        out2[pos] = (pi[0] & 1);
         return;
     }
+
+    assert(step <= (1 << (GFBITS - 2)));
 
     // B refers to the second n elements in temp.
     int16_t q[n];
 
-    cbf(out, q, pos, pi, w);
+    bool bit[n/2];
+    bool put2[n/2];
+    cbf(bit, put2, q, pi, w);
 
-    cbrecursion(out, pos0,      q,     w-1);
-    cbrecursion(out, pos0+step, q+n/2, w-1);
+    cbrecursion(out2,      pos0, q,     w-1);
+    cbrecursion(out2, step+pos0, q+n/2, w-1);
+
+    assert(step*(n/2 - 1) + pos0 < (1 << (GFBITS - 1)));
+
+
+    for (int j = 0; j < n/2; ++j) {
+        int32_t fj = bit[j] ? 1 : 0;
+
+        int pos2 = (1 << (GFBITS-1)) * (GFBITS - w)
+                 + step * j + pos0;
+
+        assert(!out2[pos2]);
+        out2[pos2] = bit[j];
+    }
+    for (int j = 0; j < n/2; ++j) {
+        int ww = GFBITS + w - 2;
+        int pos2 = (1 << (GFBITS-1)) * ww
+                 + step * j
+                 + pos0;
+        assert(!out2[pos2]);
+        out2[pos2] = put2[j];
+    }
 }
 
 extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) {
@@ -401,14 +401,23 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) 
     gf pi[perm_count];
     init_gf_array(pi, pi_obj);
 
-    lean_obj_res out_obj = lean_alloc_sarray1(1, COND_BYTES);
+    const size_t cond_bytes = (1 << 8) * 23;
+
+    const size_t cnt = (1 << (GFBITS - 1)) * (2*GFBITS-1);
+    bool out2[cnt];
+    memset(out2, 0, sizeof(out2));
+
+    cbrecursion(out2, 0, (int16_t*)pi, GFBITS);
+
+    lean_obj_res out_obj = lean_alloc_sarray1(1, cond_bytes);
     uint8_t* out = lean_sarray_cptr(out_obj);
-
-    long long w = GFBITS;
-    long long n = 1 << GFBITS;
-
-    memset(out, 0, COND_BYTES);
-    cbrecursion(out, 0, (int16_t*)pi, w);
+    for (int i = 0; i != cnt >> 3; ++i) {
+        uint8_t r = 0;
+        for (int j = 0; j != 8; ++j) {
+            r |= out2[8*i+j] ? (1 << j) : 0;
+        }
+        out[i] = r;
+    }
 
     return out_obj;
 }
