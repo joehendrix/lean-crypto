@@ -1,11 +1,6 @@
 import Mathlib.Data.List.Basic
 import Mathlib.Data.List.Perm
 
-/-! To core? -/
-
-@[simp] theorem bne_self_eq_false (a : α) [BEq α] [LawfulBEq α] : (a != a) = false := by simp [bne]
-@[simp] theorem bne_self_eq_false' (a : α) [DecidableEq α] : (a != a) = false := by simp [bne]
-
 /-! Nat -/
 
 lemma Nat.sub_lt_of_lt {n m k : Nat} (h : n < m) : n - k < m :=

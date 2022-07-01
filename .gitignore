@@ -2,6 +2,8 @@
 /build
 /include
 /lean_src
-/lean_packages
 /tmp
 /.vscode
+
+lean_packages/*
+!lean_packages/manifest.json
