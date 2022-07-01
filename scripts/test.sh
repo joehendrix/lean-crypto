@@ -1,5 +1,6 @@
 #!/bin/bash
 set -ex
+lake update
 lake build
 mkdir -p tmp
 ./build/bin/crypto tmp/kat_kem.req tmp/kat_kem.rsp

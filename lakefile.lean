@@ -94,7 +94,7 @@ extern_lib libcrypto :=
   staticLibTarget libFile dependencies
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"867d773bc4f006475ccc7168ab478fb909bc792c"
+  "https://github.com/leanprover-community/mathlib4"@"ecd37441047e490ff2ad339e16f45bb8b58591bd"
 
 package crypto {
   -- customize layout
