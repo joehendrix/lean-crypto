@@ -1,5 +1,8 @@
 {"version": 1,
  "packages":
  [{"url": "https://github.com/leanprover-community/mathlib4",
-   "rev": "ecd37441047e490ff2ad339e16f45bb8b58591bd",
-   "name": "mathlib"}]}
+   "rev": "57b04cfe3209754ba8310736808229187ffcd59c",
+   "name": "mathlib"},
+  {"url": "https://github.com/Vtec234/lean-smt",
+   "rev": "55057e6a5d4f1024cbb02e57e834cb7a6ac2f50b",
+   "name": "smt"}]}

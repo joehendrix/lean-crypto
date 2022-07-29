@@ -218,9 +218,9 @@ instance : ToString PublicKey := ⟨PublicKey.toString⟩
 end PublicKey
 
 @[reducible]
-def GF := { x:UInt16 // x < (1<<<12) }
+def GF := { x:UInt16 // x.val < (1<<<12) }
 
-def gfMask : UInt16 := (1 <<< 12) - 1
+def gfMask : UInt16 := UInt16.ofNat ((1 <<< 12) - 1)
 
 namespace GF
 

@@ -2,6 +2,7 @@ import Lake
 open System Lake DSL
 
 def cDir : FilePath := "c"
+def libDir : FilePath := "lib"
 def buildDir := defaultBuildDir
 
 def ffiOTarget (pkgDir srcPath : FilePath) (compiler: FilePath) (deps : List FileTarget) (opts : Array String) : FileTarget :=
@@ -42,7 +43,7 @@ def mcelieceTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
        ]
 
 extern_lib libmceliece348864 :=
-  let libFile := __dir__ / buildDir / cDir / "libmceliece348864.a"
+  let libFile := __dir__ / buildDir / libDir / "libmceliece348864.a"
   let dependencies := mcelieceFiles.map (mcelieceTarget __dir__)
   staticLibTarget libFile (dependencies ++ [bindingsTarget __dir__])
 
@@ -63,7 +64,7 @@ def keccakTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
   ffiOTarget pkgDir src "cc" [] #["-O3", includeFlag incPath, includeFlag commonIncPath ]
 
 extern_lib libkeccak :=
-  let libFile := __dir__ / buildDir / cDir / "libkeccak.a"
+  let libFile := __dir__ / buildDir / libDir / "libkeccak.a"
   let dependencies := keccakFiles.map (keccakTarget __dir__)
   staticLibTarget libFile dependencies
 
@@ -89,22 +90,25 @@ def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
    ]
 
 extern_lib libcrypto :=
-  let libFile := __dir__ / buildDir / cDir / "libcrypto.a"
+  let libFile := __dir__ / buildDir / libDir / "libcrypto.a"
   let dependencies := opensslTargets __dir__
   staticLibTarget libFile dependencies
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"ecd37441047e490ff2ad339e16f45bb8b58591bd"
+  "https://github.com/leanprover-community/mathlib4"@"57b04cfe3209754ba8310736808229187ffcd59c"
+
+require smt from git
+  "https://github.com/Vtec234/lean-smt"@"theory-bv"
 
 package crypto {
   -- customize layout
   srcDir := "lib"
   libRoots := #[`Crypto]
   moreLeancArgs := #["-O3"]
+  precompileModules := true
 }
 
-lean_lib Crypto {
-}
+lean_lib Crypto
 
 @[defaultTarget]
 lean_exe crypto {
