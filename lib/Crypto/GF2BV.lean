@@ -6,7 +6,7 @@ import Smt.Tactic.WHNFSmt
 
 /-! Concrete implementations of GF(2)[X] and GF(2^k) operations as bitvector circuits. -/
 
-namespace GF2Poly
+namespace GF2BVPoly
 
 /-- Semantic interpretation of a bitvector as a polynomial. -/
 def interp (x : BitVec w) : GF2Poly :=
@@ -102,7 +102,7 @@ def e : BitVec 8 := ⟨0b10000011, by decide⟩
 
 end test
 
-end GF2Poly
+end GF2BVPoly
 
 /-! Finite field GF(2^8) -/
 
@@ -111,7 +111,7 @@ abbrev GF256 := BitVec 8
 
 namespace GF256
 
-open GF2Poly
+open GF2BVPoly
 
 -- x⁸ + x⁴ + x³ + x + 1
 def irreducible : BitVec 9 := BitVec.ofNat 9 0b100011011
@@ -135,10 +135,10 @@ where
 -- NOTE(WN): We have to define this because WHNFSmt reduction of `pow` is buggy
 -- and introduces WF encoding internals
 /-- `pow2 k = pow (2^k)` -/
-def pow2 : Nat → GF256 → GF256
-  | 0,   x => x
-  | n+1, x =>
-    let_opaque v := pow2 n x
+def pow2 (k : Nat) (x : GF256) : GF256 :=
+  if k = 0 then x
+  else
+    let_opaque v := pow2 (k-1) x
     mul v v
   
 def inverse (x : GF256) : GF256 :=
