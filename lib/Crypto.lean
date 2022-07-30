@@ -1,5 +1,7 @@
 import Crypto.Bool
 import Crypto.BitVec2
+import Crypto.GF2BV
+import Crypto.GF2Poly
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.Exp
