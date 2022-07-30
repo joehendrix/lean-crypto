@@ -95,10 +95,10 @@ extern_lib libcrypto :=
   staticLibTarget libFile dependencies
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"57b04cfe3209754ba8310736808229187ffcd59c"
+  "https://github.com/Vtec234/mathlib4"@"nightly-2022-07-27"
 
 require smt from git
-  "https://github.com/Vtec234/lean-smt"@"theory-bv"
+  "https://github.com/Vtec234/lean-smt"@"specialize-def"
 
 package crypto {
   -- customize layout

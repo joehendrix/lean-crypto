@@ -132,7 +132,7 @@ opaque randombytesInit (s : Seed) : DRBG :=
   let b := ByteVec.generate _ (λi => b.get i ^^^ s.get i)
   { key := b.extractN 0 32, v := b.extractN 32 16 }
 
-private theorem randomBytesTerminates : ∀n, n ≥ 16 → n - 16 < n := sorry
+private theorem randomBytesTerminates : ∀ n, n ≥ 16 → n - 16 < n := sorry
 
 def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
    : ByteArray × ByteVec 16 :=
@@ -141,11 +141,11 @@ def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
   else
     let v := incrementV v
     let b := aes256Ecb key v
-    if n ≥ 16 then
+    if h : n ≥ 16 then
+      have : n - 16 < n := randomBytesTerminates n ‹_›
       randombytes3 key v (a ++ b.data) (n - 16)
     else
       (a ++ b.data.extractN 0 n, v)
-  decreasing_by exact randomBytesTerminates _ ‹_›
 
 theorem randomBytes3_size (key) (v) (a) (n:Nat)
     : (randombytes3 key v a n).1.size = n := by
