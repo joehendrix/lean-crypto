@@ -121,6 +121,24 @@ def mul (p q : GF2Poly) : GF2Poly :=
 
 instance : Mul GF2Poly := ⟨mul⟩
 
+def mulCoeff (p q : GF2Poly) (i : Nat) : GF2 :=
+  /-
+  If    p(x) = a₀ + a₁x + … + a_wxʷ
+  and   q(x) = b₀ + b₁x + … + b_wxʷ
+  then  p(x)q(x) = c₀ + c₁x + … + c_wxʷ -/
+  coeffs p q i |>.foldl (init := 0) (· + ·)
+
+where
+  /-- cᵢ = a₀bᵢ + a₁bᵢ₋₁ + … + aᵢb₀ -/
+  coeffs (p q : GF2Poly) (i : Nat) : List GF2 :=
+    List.range i |>.map fun j =>
+      let pi := p.coeff j
+      let qi := q.coeff (i - j)
+      pi * qi
+
+theorem mul_coeff_eq_mulCoeff (p q : GF2Poly) : ∀ i, (p * q).coeff i = mulCoeff p q i :=
+  sorry
+
 theorem mul_degree (p q : GF2Poly) : (p * q).degree ≤ p.degree + q.degree := sorry
 
 def pow (p : GF2Poly) (n : Nat) : GF2Poly :=
