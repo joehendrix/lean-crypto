@@ -2,6 +2,7 @@
 set -ex
 lake update
 lake build Crypto
+lake build Smt:shared
 mkdir -p tmp
 
 lake build mceliece
