@@ -68,8 +68,24 @@ where go (p : Nat) : List GF2 :=
 def coeff (p : GF2Poly) (i : Nat) : GF2 :=
   (p.bits >>> i) &&& 1 == 1
 
-theorem coeff_eq_coeffs_get (p : GF2Poly) (i : Nat) : p.coeff i = p.coeffs.getD i 0 :=
-  sorry
+theorem coeff_eq_coeffs_get (p : GF2Poly) (i : Nat) : p.coeff i = p.coeffs.getD i 0 := by
+  unfold coeff
+  unfold coeffs
+  induction p.bits using Nat.strongInductionOn generalizing i with
+  | ind n ih =>
+    unfold coeffs.go
+    cases (inferInstance : Decidable (n = 0)) with
+    | isTrue hEq => simp [hEq, List.getD]
+    | isFalse hNe =>
+      have : n >>> 1 < n := by
+        rw [← Nat.div_two_pow_eq_shiftRight]
+        exact Nat.div_lt_self (Nat.zero_lt_of_ne_zero hNe) (Nat.lt_succ_self _)
+      cases (inferInstance : Decidable (i = 0)) with
+      | isTrue hEqI => simp [hNe, hEqI]
+      | isFalse hNeI =>
+        have hLe : 1 ≤ i :=
+          Nat.succ_le_of_lt (Nat.zero_lt_of_ne_zero hNeI)
+        simp [hNe, hNeI, ← ih _ this (i-1), Nat.add_comm 1 (i-1), Nat.sub_add_cancel hLe]
 
 instance : Repr GF2Poly where
   reprPrec p _ :=

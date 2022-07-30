@@ -50,6 +50,10 @@ theorem bitwise_comm_of_comm (f : Bool → Bool → Bool) (hComm : ∀ x y, f x 
 theorem xor_comm (a b : Nat) : a ^^^ b = b ^^^ a :=
   bitwise_comm_of_comm bne (Bool.bne_symm)
 
+@[simp] theorem zero_shr : 0 >>> n = 0 := sorry
+@[simp] theorem shr_zero : n >>> 0 = n := rfl
+@[simp] theorem shr_add (n k l : Nat) : n >>> k >>> l = n >>> (k + l) := sorry
+
 -- TODO(WN): @[csimp] would be nice
 theorem mul_two_pow_eq_shiftLeft (n k : Nat) : n * (2 ^ k) = n <<< k := by
   induction k generalizing n with
@@ -120,6 +124,9 @@ theorem List.lt_of_mem_rangeModel : ∀ { i : Nat }, i ∈ rangeModel n → i < 
 theorem List.rangeModel_succ {n : Nat} : rangeModel (n+1) = rangeModel n ++ [n] := rfl
 
 /-! List lemmas -/
+
+@[simp] theorem List.getD_cons : List.getD (x :: xs) i d = if i = 0 then x else List.getD xs (i-1) d :=
+  sorry
 
 lemma List.foldl_ext (f g : α → β → α) (a : α)
   {l : List β} (H : ∀ a : α, ∀ b ∈ l, f a b = g a b) :
