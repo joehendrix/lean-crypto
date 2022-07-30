@@ -166,36 +166,37 @@ def mod (p q : GF2Poly) : GF2Poly :=
 instance : Mod GF2Poly := ⟨mod⟩
 
 -- NOTE(WN): If implemented correctly, this should be ring-isomorphic to mathlib's `polynomial GF2`
-instance : CommRing GF2Poly where
-  add_zero           := sorry
-  zero_add           := sorry
-  add_comm           := sorry
-  add_assoc          := sorry
-  add_left_neg       := sorry
-  mul_zero           := sorry
-  zero_mul           := sorry
-  mul_one            := sorry
-  one_mul            := sorry
-  mul_comm           := sorry
-  mul_assoc          := sorry
-  left_distrib       := sorry
-  right_distrib      := sorry
-  npow_zero' n       := sorry
-  npow_succ' n x     := sorry
-  nsmul n p          := sorry
-  nsmul_zero'        := sorry
-  nsmul_succ' n x    := sorry
-  sub_eq_add_neg a b := sorry
-  gsmul n p          := sorry
-  gsmul_zero'        := sorry
-  gsmul_succ' n x    := sorry
-  gsmul_neg' n x     := sorry
-  natCast            := sorry
-  natCast_zero       := sorry
-  natCast_succ _     := sorry
-  intCast            := sorry
-  intCast_ofNat _    := sorry
-  intCast_negSucc _  := sorry
+-- https://github.com/leanprover/lean4/issues/1388
+-- instance : CommRing GF2Poly :=
+--   add_zero           := sorry
+--   zero_add           := sorry
+--   add_comm           := sorry
+--   add_assoc          := sorry
+--   add_left_neg       := sorry
+--   mul_zero           := sorry
+--   zero_mul           := sorry
+--   mul_one            := sorry
+--   one_mul            := sorry
+--   mul_comm           := sorry
+--   mul_assoc          := sorry
+--   left_distrib       := sorry
+--   right_distrib      := sorry
+--   npow_zero' n       := sorry
+--   npow_succ' n x     := sorry
+--   nsmul n p          := sorry
+--   nsmul_zero'        := sorry
+--   nsmul_succ' n x    := sorry
+--   sub_eq_add_neg a b := sorry
+--   gsmul n p          := sorry
+--   gsmul_zero'        := sorry
+--   gsmul_succ' n x    := sorry
+--   gsmul_neg' n x     := sorry
+--   natCast            := sorry
+--   natCast_zero       := sorry
+--   natCast_succ _     := sorry
+--   intCast            := sorry
+--   intCast_ofNat _    := sorry
+--   intCast_negSucc _  := sorry
 
 -- NOTE(WN): should also have EuclideanDomain GF2Poly
  

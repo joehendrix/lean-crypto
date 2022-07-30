@@ -105,13 +105,37 @@ package crypto {
   srcDir := "lib"
   libRoots := #[`Crypto]
   moreLeancArgs := #["-O3"]
-  -- https://github.com/leanprover/lean4/issues/1388
-  -- precompileModules := true
+  precompileModules := true
 }
 
 lean_lib Crypto
 
 @[defaultTarget]
-lean_exe crypto {
-  root := `Main
-}
+lean_exe mceliece where
+  root := `McEliece
+
+script runTest (args) do
+  let some fname := args[0]? | do printUsage; return 1
+  let fname := FilePath.mk fname
+  if fname.extension != some "lean" then printUsage; return 1
+  -- Note: this only works on Unix since it needs the shared library `libSmt`
+  -- to also load its transitive dependencies.
+  let smtDynlib := (← findModule? `Smt).get!.dynlibFile
+  let out ← IO.Process.output {
+    cmd := (← getLean).toString
+    args := #[s!"--load-dynlib={smtDynlib}", fname.toString],
+    env := (← getAugmentedEnv)
+  }
+  let expected ← IO.FS.readFile (fname.withExtension "expected")
+  if ¬out.stderr.isEmpty ∨ out.stdout ≠ expected then
+    IO.println s!"Stderr:\n{out.stderr}"
+    IO.println s!"Stdout:\n{out.stdout}"
+    IO.println s!"Expected:\n{expected}"
+    return 2
+  return 0
+
+where printUsage : ScriptM Unit := do
+  IO.println "Run a test file `test.lean` and compare the output to `test.expected`.
+
+USAGE:
+  lake run runTest <file>.lean"
