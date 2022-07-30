@@ -41,7 +41,7 @@ def translateSmtArray : Translator
 def SmtArray.storeBv (a : SmtArray (BitVec 8) (BitVec 8)) (x v : Nat) : SmtArray (BitVec 8) (BitVec 8) :=
   a.store (.ofNat 8 x) (.ofNat 8 v)
 
-/-! We show that the encryption and decryptions S-boxes have correct lookup tables.
+/-! We show that the encryption and decryption S-boxes are correctly expressed as lookup tables.
 https://cryptol.net/files/ProgrammingCryptol.pdf ex. 5.10. -/
 
 -- The affine transform and its inverse
@@ -206,7 +206,7 @@ theorem SubByte_eq_SubByte' (b : GF256) : SubByte b = SubByte' b := by
   simp only [sbox, SmtArray.storeBv] at SubByte'.def
   save
 
-  smt [
+  smt_show [
     GF256,
     GF256.irreducible,
     GF256.inverse,
@@ -218,7 +218,7 @@ theorem SubByte_eq_SubByte' (b : GF256) : SubByte b = SubByte' b := by
     SubByte',
     GF2BVPoly.polyMod.«16».«8»,
     GF2BVPoly.polyMul.«8».«8»
-   ] (timeout := 30)
+   ] 
 
   sorry
 
@@ -248,7 +248,7 @@ theorem InvSubByte_eq_InvSubByte' (b : GF256) : InvSubByte b = InvSubByte' b := 
   simp only [invSbox, SmtArray.storeBv] at InvSubByte'.def
   save
 
-  smt [
+  smt_show [
     GF256,
     GF256.irreducible,
     GF256.inverse,
@@ -260,6 +260,6 @@ theorem InvSubByte_eq_InvSubByte' (b : GF256) : InvSubByte b = InvSubByte' b := 
     InvSubByte',
     GF2BVPoly.polyMod.«16».«8»,
     GF2BVPoly.polyMul.«8».«8»
-   ] (timeout := 30)
+   ] 
 
   sorry

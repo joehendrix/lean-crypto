@@ -25,7 +25,7 @@ example (x : GF256) : pow 256 x = x := by
     at GF256.mul.def
   save
 
-  smt [
+  smt_show [
     GF256,
     GF256.irreducible,
     GF256.mul,
@@ -33,6 +33,6 @@ example (x : GF256) : pow 256 x = x := by
     GF256.pow,
     GF2BVPoly.polyMod.«16».«8»,
     GF2BVPoly.polyMul.«8».«8»
-   ] (timeout := 30)
+   ]
 
   sorry
