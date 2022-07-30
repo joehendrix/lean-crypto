@@ -105,7 +105,8 @@ package crypto {
   srcDir := "lib"
   libRoots := #[`Crypto]
   moreLeancArgs := #["-O3"]
-  precompileModules := true
+  -- https://github.com/leanprover/lean4/issues/1388
+  -- precompileModules := true
 }
 
 lean_lib Crypto
