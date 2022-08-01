@@ -1,10 +1,13 @@
 import Crypto.Array
+import Crypto.Hadamard
 
-/--
+/-
 This module introduces arrays with an explicit type parameter for storing length.
 -/
 
--- An array with explicit parameter for length.
+/--
+An array with explicit parameter for length.
+-/
 structure Vector (n:Nat) (α:Type) where
   data : Array α
   size_proof : data.size = n
@@ -104,5 +107,25 @@ def extractN! [Inhabited α] (a : Vector n α) (s m:Nat) : Vector m α :=
                 exact Nat.le_of_lt (Nat.gt_of_not_le h)
         simp [Nat.add_sub_of_le p]
   ⟨b ++ e, pr⟩
+
+def smul [h:HMul α β γ] (a:α) (v:Vector n β) : Vector n γ := (HMul.hMul a) <$> v
+
+instance [HMul α β γ]: HMul α (Vector n β) (Vector n γ) := ⟨Vector.smul⟩
+
+protected
+def zip (f: α → β → γ) (u:Vector n α) (v:Vector n β) : Vector n γ :=
+  Vector.generate n (λi => f (u.get i) (v.get i))
+
+def add [h:HAdd α β γ] (u:Vector n α) (v:Vector n β) : Vector n γ :=
+  Vector.zip HAdd.hAdd u v
+
+instance [HAdd α β γ] : HAdd (Vector n α) (Vector n β) (Vector n γ) where
+  hAdd := Vector.add
+
+def hadProd [h:HMul α β γ] (u:Vector n α) (v:Vector n β) : Vector n γ :=
+  Vector.zip HMul.hMul u v
+
+instance [HMul α β γ] : HadamardProduct (Vector n α) (Vector n β) (Vector n γ) where
+  hadProd := Vector.hadProd
 
 end Vector
