@@ -191,20 +191,6 @@ extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in
     return r_obj;
 }
 
-extern "C" uint16_t lean_gf_mul(uint16_t x, uint16_t y) {
-    return gf_mul(x, y);
-}
-
-extern "C" uint16_t lean_gf_frac(uint16_t x, uint16_t y) {
-    return gf_frac(x, y);
-}
-
-extern "C"
-uint16_t lean_gf_inv(uint16_t x) {
-    gf inv = gf_inv(x);
-    return inv;
-}
-
 extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
     assert(lean_array_size(irr_obj) == SYS_T);
     gf irr[SYS_T];
@@ -345,22 +331,20 @@ static void cbf(bool* bit, bool* put2, int16_t* q, const int16_t *pi, int w) {
 /* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
 /* caller must 0-initialize positions first */
 /* temp must have space for int32[2*n] */
-static void cbrecursion(bool* out2, int pos0, const int16_t *pi, int w) {
+static void cbrecursion(bool* out2, const int16_t *pi, int w) {
     assert(w >= 1);
-    const int n = 1 << w;
-    int wk = GFBITS - w;
-
-    const int step = 1 << wk;
-    assert(pos0 < step);
-
     if (w == 1) {
-        int pos = (1 << (GFBITS - 1)) * wk + pos0;
+        int pos = (1 << (GFBITS - 1)) * (GFBITS - 1);
         assert(!out2[pos]);
         assert((pi[0] & ~1) == 0);
         out2[pos] = (pi[0] & 1);
         return;
     }
 
+    const int n = 1 << w;
+    int wk = GFBITS - w;
+
+    const int step = 1 << wk;
     assert(step <= (1 << (GFBITS - 2)));
 
     // B refers to the second n elements in temp.
@@ -370,26 +354,19 @@ static void cbrecursion(bool* out2, int pos0, const int16_t *pi, int w) {
     bool put2[n/2];
     cbf(bit, put2, q, pi, w);
 
-    cbrecursion(out2,      pos0, q,     w-1);
-    cbrecursion(out2, step+pos0, q+n/2, w-1);
-
-    assert(step*(n/2 - 1) + pos0 < (1 << (GFBITS - 1)));
-
+    cbrecursion(out2,      q,     w-1);
+    cbrecursion(out2+step, q+n/2, w-1);
 
     for (int j = 0; j < n/2; ++j) {
         int32_t fj = bit[j] ? 1 : 0;
 
-        int pos2 = (1 << (GFBITS-1)) * (GFBITS - w)
-                 + step * j + pos0;
+        int pos2 = step * (1 << (w-1)) * (GFBITS - w) + step * j;
 
         assert(!out2[pos2]);
         out2[pos2] = bit[j];
     }
     for (int j = 0; j < n/2; ++j) {
-        int ww = GFBITS + w - 2;
-        int pos2 = (1 << (GFBITS-1)) * ww
-                 + step * j
-                 + pos0;
+        int pos2 = step * (1 << (w-1)) * (GFBITS + w - 2) + step * j;
         assert(!out2[pos2]);
         out2[pos2] = put2[j];
     }
@@ -407,7 +384,7 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) 
     bool out2[cnt];
     memset(out2, 0, sizeof(out2));
 
-    cbrecursion(out2, 0, (int16_t*)pi, GFBITS);
+    cbrecursion(out2, (int16_t*)pi, GFBITS);
 
     lean_obj_res out_obj = lean_alloc_sarray1(1, cond_bytes);
     uint8_t* out = lean_sarray_cptr(out_obj);

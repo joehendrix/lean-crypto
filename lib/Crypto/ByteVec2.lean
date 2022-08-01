@@ -120,16 +120,7 @@ protected def toHex {n:Nat} (a:ByteVec n) : String :=
 
 end ByteVec
 
-
---structure UInt16Vec (n:Nat) where
---  data : Array
---  size_proof : data.size = n
-
---namespace ByteVec
-
 syntax "#v[" sepBy(term, ", ") "]" : term
 
 macro_rules
   | `(#v[ $elems,* ]) => `(ByteVec.fromList [ $elems,* ])
-
-
