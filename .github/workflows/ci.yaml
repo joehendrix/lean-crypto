@@ -15,9 +15,9 @@ jobs:
           os: ubuntu-latest
         - name: MacOS
           os: macos-latest
-        - name: Windows
-          os: windows-latest
-          shell: msys2 {0}
+       # - name: Windows
+       #   os: windows-latest
+       #   shell: msys2 {0}
       # complete all jobs
       fail-fast: false
     steps:
