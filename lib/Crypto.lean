@@ -60,47 +60,12 @@ def concatVec (v : Vector m (Vector n α)) : Vector (m*n) α :=
 def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × β :=
   (λ(v,b) => (concatByteVec v, b)) (iterV m f b)
 
-/-
-def concatIterV (m:Nat) (f : β → ByteVec n × β) (b:β) : ByteVec (m*n) × β :=
-  let g := λ((a, b) : ByteArray × β) =>
-        let (v, b) := f b
-        (a ++ v.data, b)
-  let (a, b) := iterN g m (ByteArray.mkEmpty (m*n), b)
-  let p : a.size = m*n := by admit
-  (⟨a, p⟩, b)
--/
-
-/-
-@[extern "lean_elt_from_bytevec"]
-opaque eltFromByteVec {w : @&Nat} (r : @&Nat) (v : @&(ByteVec w)) : BitVec r
--/
-
-def bitvecToByteVec_lsb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w :=
-  ByteVec.generate w λi => Id.run do
-    let mut z : UInt8 := 0
-    for j in range 0 8 do
-      z := z ||| (if v.lsb_get! (8*i+j) then (1:UInt8) <<< OfNat.ofNat j else 0)
-    pure z
-
 def bitvecToByteVec_msb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w :=
   ByteVec.generate w λi => Id.run do
     let mut z : UInt8 := 0
     for j in range 0 8 do
       z := z ||| (if v.msb_get! (8*i+j) then (1:UInt8) <<< OfNat.ofNat j else 0)
     pure z
-
-def bitvecToByteVec_msbb { r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w :=
-  ByteVec.generate w λi => Id.run do
-    let mut z : UInt8 := 0
-    for j in range 0 8 do
-      z := z ||| (if v.msbb_get! (8*i+j) then (1:UInt8) <<< OfNat.ofNat j else 0)
-    pure z
-
-def msbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
-  BitVec.generate_msbb r (λi => v.msb_get! i.val)
-
-def lsbToMsbb {r:Nat} (v:BitVec r) : BitVec r :=
-  BitVec.generate_msbb r (λi => v.lsb_get! i.val)
 
 def ByteVec.toBuffer {n:Nat} : ByteVec n → ByteBuffer
 | ⟨a,_⟩ => ⟨a⟩
@@ -314,8 +279,6 @@ def bitrev (x:GF) : GF :=
   ⟨a >>> 4, sorry⟩
 
 end GF
-
-
 
 def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
   let f (x:UInt8) : UInt16 := UInt16.ofNat x.toNat
@@ -726,22 +689,12 @@ def load8_32 (c: ByteVec 256) : Vector 32 UInt64 :=
       r := (r <<< 8) ||| (c.get! (8*i+(7-j))).toNat
     pure $ UInt64.ofNat r
 
-def bitvecFromUInt64Vec (r:Vector 64 UInt64) : BitVec (1 <<< gfbits) :=
-  BitVec.generate_msb (1 <<< gfbits) $ λi =>
-    let i := (1 <<< gfbits) - 1 - i.val
-    let e := r.get! (63 - i/64)
-    let m := i % 64
-    let m2 := 8 * (7 - m/8) + m % 8
-    (e &&& UInt64.ofNat (1 <<< m2)) ≠ 0
-
-def apply_benes0 (r : BitVec (1 <<< gfbits))
+def apply_benes0 (a0 : Vector 64 UInt64)
                  (c : ByteVec cond_bytes)
-    : BitVec (1 <<< gfbits) := Id.run do
+    : Vector 64 UInt64 := Id.run do
   let inc := 256
 
-  let mut a :=
-      Vector.generate 64 $ λi =>
-        load8 ((r.val >>> (64*(63-i.val))) &&& (2^64 - 1))
+  let mut a := a0
   a := tranpose64 a
   for l in range 0 6 do
     let c := slice c (inc*l) inc
@@ -765,23 +718,27 @@ def apply_benes0 (r : BitVec (1 <<< gfbits))
     let c := tranpose64 c
     let c := Vector.generate 32 (λi => c.get! i)
     a := benes_layer a c l
-  a := tranpose64 a
-
-  pure (bitvecFromUInt64Vec a)
+  pure <| tranpose64 a
 
 def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
-  let L : Vector gfbits (BitVec (1 <<< gfbits)) :=
+  let L : Vector gfbits (Vector 64 UInt64) :=
         Vector.generate gfbits λj =>
-          let v :=
-            BitVec.generate_msbb _ λ(i : Fin (1 <<< gfbits)) =>
+          let r :=
+            BitVec.generate_lsb (1 <<< gfbits) λ(i : Fin (1 <<< gfbits)) =>
               let i : GF := OfNat.ofNat i.val
-              i.bitrev.bit j
-          apply_benes0 v c
-  Vector.generate N λ i => Id.run do
+              i.bit (11-j)
+          let a0 :=
+            Vector.generate 64 (λi =>
+              UInt64.ofNat ((r.val >>> (64*i.val)) &&& (2^64 - 1)))
+          apply_benes0 a0 c
+  Vector.generate N λi0 => Id.run do
+    let i  := i0.val / 64
+    let m2 := i0.val % 64
     let mut si : Nat := 0
     for k in range 0 gfbits do
-      let j := gfbits-1-k
-      si := si <<< 1 ||| (if (L.get! j).msbb_get! i.val then 1 else 0)
+      let r := L.get! (gfbits-1-k)
+      let e := ((r.get! i).toNat >>> m2) &&& 1
+      si := si <<< 1 ||| e
     pure (OfNat.ofNat si)
 
 def synd
@@ -824,7 +781,7 @@ def bm
         b := d
     B := Vector.generate (sys_t+1) λi =>
            if i = 0 then 0 else B.get! (i-1)
-  pure $ Vector.generate (sys_t+1) λi => C.get! (sys_t-i)
+  pure $ Vector.generate (sys_t+1) λi => C.get ⟨sys_t-i, sorry⟩
 
 -- Decrypt the N-bit vector created by mkCryptoKemEnc
 def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
@@ -839,7 +796,7 @@ def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
   for i in range 0 N do
     if images.get! i = 0 then
       w := w + 1
-  let e : BitVec N := BitVec.generate_msb N λi => images.get! i = 0
+  let e : BitVec N := BitVec.generate_msb N λi => images.get i = 0
   -- Generate preimage
   if w = sys_t ∧ Ciphertext.mkHash e = c.hash ∧ s = synd g l e then
     some e
