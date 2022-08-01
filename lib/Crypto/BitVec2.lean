@@ -6,6 +6,10 @@ import Smt.Data.BitVec
 
 namespace BitVec
 
+def lsb_getAux (x : BitVec m) (i : Nat) : Bool :=
+  (x.val &&& (1 <<< i)) ≠ 0
+
+@[implementedBy lsb_getAux]
 def lsb_get! (x : BitVec m) (i : Nat) : Bool :=
   BitVec.lsbGet x i
 

@@ -95,20 +95,22 @@ extern_lib libcrypto :=
   staticLibTarget libFile dependencies
 
 require mathlib from git
-  "https://github.com/Vtec234/mathlib4"@"nightly-2022-07-27"
+  "https://github.com/leanprover-community/mathlib4"@"7da24c4024a2cb547d9d6e85943027daa77d850f"
 
 require smt from git
   "https://github.com/Vtec234/lean-smt"@"specialize-def"
 
-package crypto {
+package LeanCrypto where
   -- customize layout
   srcDir := "lib"
   libRoots := #[`Crypto]
   moreLeancArgs := #["-O3"]
-  precompileModules := true
-}
+  -- Setting this to `true` produces `libCrypto` which conflicts on case-insensitive filesystems
+  -- with `libcrypto` produced from OpenSSL.
+  precompileModules := false
 
-lean_lib Crypto
+lean_lib LeanCrypto where
+  roots := #[`Crypto]
 
 @[defaultTarget]
 lean_exe mceliece where
