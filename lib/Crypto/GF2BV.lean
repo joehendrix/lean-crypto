@@ -1,5 +1,5 @@
 import Crypto.ToMathlib
-import Crypto.BitVec2
+import Crypto.BitVec
 import Crypto.GF2Poly
 
 import Smt.Tactic.WHNFSmt
