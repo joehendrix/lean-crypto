@@ -116,6 +116,9 @@ def ofUInt64lsb (v:UInt64) : ByteVec 8 :=
 protected def toHex {n:Nat} (a:ByteVec n) : String :=
   a.data.foldl (λs b => s ++ b.toHex) ""
 
+def extractN! {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
+  ByteVec.generate n (λi => v.get! (l+i))
+
 end ByteVec
 
 syntax "#v[" sepBy(term, ", ") "]" : term

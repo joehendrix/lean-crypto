@@ -6,51 +6,14 @@ import Crypto.ByteVec
 import Crypto.Exp
 import Crypto.Matrix
 import Crypto.Nat
+import Crypto.Prim.Shake
+import Crypto.Random.PRNG
 import Crypto.Range
 import Crypto.UInt8
 import Crypto.Vector
 
 def select (c:BitVec n) (t f : Vector n α) : Vector n α :=
   Vector.generate n (λi => if c.msb_get! i then t.get i else f.get i)
-
--- `iterN f n a` return `f^n a`.
-def iterN (f : α → α) : Nat → α → α
-| 0, a => a
-| i+1, a => iterN f i (f a)
-
--- `iterV n f b` returns a pair `(v, r)` where `r`
-def iterV (n:Nat) (f : β → α × β) (b:β) : Vector n α := Id.run do
-  let mut a := Array.mkEmpty n
-  let mut b := b
-  for i in range 0 n do
-    let (v, c) := f b
-    a := a.push v
-    b := c
-  let p : a.size = n := by admit
-  ⟨a, p⟩
-
-def concatByteVec (v : Vector m (ByteVec n)) : ByteVec (m*n) :=
-  let q {i} (p : i < m*n) : i / n < m := sorry
-  let r {i} (p : i < m*n) : 0 < n := sorry
-  ByteVec.generate (m*n) (λi => (v.get ⟨i.val / n, q i.isLt⟩).get (Fin.ofNat' i.val (r i.isLt)))
-
-def concatVec (v : Vector m (Vector n α)) : Vector (m*n) α :=
-  let q {i} (p : i < m*n) : i / n < m := sorry
-  let r {i} (p : i < m*n) : 0 < n := sorry
-  Vector.generate (m*n) (λi => (v.get ⟨i.val / n, q i.isLt⟩).get (Fin.ofNat' i.val (r i.isLt)))
-
-def bitvecToByteVec_msb {r : @&Nat} (w : @&Nat) (v : @&(BitVec r)) : ByteVec w :=
-  ByteVec.generate w λi => Id.run do
-    let mut z : UInt8 := 0
-    for j in range 0 8 do
-      z := z ||| (if v.msb_get! (8*i+j) then (1:UInt8) <<< OfNat.ofNat j else 0)
-    pure z
-
-structure DRBG where
-  key : ByteVec (256 / 8)
-  v : ByteVec (128 / 8)
-
-instance : Inhabited DRBG := ⟨Inhabited.default, Inhabited.default⟩
 
 def tryN {α:Type _ } (f:DRBG → Option α × DRBG) : DRBG → Nat → Option α × DRBG
   | drbg, 0 =>
@@ -60,72 +23,31 @@ def tryN {α:Type _ } (f:DRBG → Option α × DRBG) : DRBG → Nat → Option �
     | (some ind, drbg) => (some ind, drbg)
     | (none, drbg) => tryN f drbg attempts
 
-@[reducible]
-def Seed := ByteVec 48
+-- `iterN f n a` return `f^n a`.
+def iterN (f : α → α) : Nat → α → α
+| 0, a => a
+| i+1, a => iterN f i (f a)
 
-opaque incrementV (v : ByteVec 16) : ByteVec 16 := Id.run do
-  let mut v := v
-  for i in range 0 15 do
-    let j := 15 - i
-    let vj := v.get! j
-    if vj = 0xff then
-      v := v.set! j 0x00
-    else
-      v := v.add! j 1
-      break
-  pure v
+def concatVec (v : Vector m (Vector n α)) : Vector (m*n) α :=
+  let q {i} (p : i < m*n) : i / n < m := sorry
+  let r {i} (p : i < m*n) : 0 < n := sorry
+  Vector.generate (m*n) (λi => (v.get ⟨i.val / n, q i.isLt⟩).get (Fin.ofNat' i.val (r i.isLt)))
 
-@[extern "lean_AES256_ECB"]
-opaque aes256Ecb (key: @&ByteVec 32) (v: @&ByteVec 16) : ByteVec 16
+def bitvecToByteVec_msb {r : Nat} (w : Nat) (v : BitVec r) : ByteVec w :=
+  ByteVec.generate w λi => Id.run do
+    let mut z : UInt8 := 0
+    for j in range 0 8 do
+      z := z ||| (if v.msb_get! (8*i+j) then (1:UInt8) <<< OfNat.ofNat j else 0)
+    pure z
 
-opaque aes256CtrDrbgUpdate (key : ByteVec 32) (v0 : ByteVec 16) : ByteVec 48 :=
-  let f := λv => let v := incrementV v; (aes256Ecb key v, v)
-  match iterV 3 f v0 with
-  | v => concatByteVec v
+namespace UInt16
 
-opaque randombytesInit (s : Seed) : DRBG :=
-  let key := ByteVec.generate 32 (λ_ => 0)
-  let v   := ByteVec.generate 16 (λ_ => 0)
-  let b := aes256CtrDrbgUpdate key v
-  let b := ByteVec.generate _ (λi => b.get i ^^^ s.get i)
-  { key := b.extractN 0 32, v := b.extractN 32 16 }
+theorem and_right_lt {x y n : UInt16} : y < n →  (x &&& y) < n := by admit
 
-private theorem randomBytesTerminates : ∀ n, n ≥ 16 → n - 16 < n := sorry
-
-def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
-   : ByteArray × ByteVec 16 :=
-  if n == 0 then
-    (a, v)
-  else
-    let v := incrementV v
-    let b := aes256Ecb key v
-    if h : n ≥ 16 then
-      have : n - 16 < n := randomBytesTerminates n ‹_›
-      randombytes3 key v (a ++ b.data) (n - 16)
-    else
-      (a ++ b.data.extractN 0 n, v)
-
-theorem randomBytes3_size (key) (v) (a) (n:Nat)
-    : (randombytes3 key v a n).1.size = n := by
+def xor_lt_both {x y n: UInt16} : x < (1 <<< n) → y < (1 <<< n) →  (x ^^^ y) < (1 <<< n) := by
   admit
 
-opaque randombytes (rbg : DRBG) (n : Nat) : ByteVec n × DRBG :=
-  let key := rbg.key
-  let v := rbg.v
-  let p := randombytes3 key v (ByteArray.mkEmpty n) n
-  let pr : p.1.size = n := randomBytes3_size key v (ByteArray.mkEmpty n) n
-  let b := aes256CtrDrbgUpdate key p.2
-  let rbg := { key := b.extractN 0 32, v := b.extractN 32 16 }
-  (⟨p.1, pr⟩, rbg)
-
-def initKeypairSeedPrefix : ByteVec 1 := #v[64]
-
-def initKeypairSeed (v:ByteVec 32) : ByteVec 33 := initKeypairSeedPrefix ++ v
-
-@[extern "lean_shake256"]
-opaque shake (w:Nat) (input: ByteArray) : ByteVec w
-
-def cryptoHash32b (b:ByteArray) : ByteVec 32 := shake 32 b
+end UInt16
 
 namespace Mceliece
 namespace Ref348864
@@ -177,18 +99,18 @@ instance : ToString PublicKey := ⟨PublicKey.toString⟩
 end PublicKey
 
 @[reducible]
-def GF := { x:UInt16 // x.val < (1<<<12) }
+def GF := { x:UInt16 // x < (1:UInt16) <<< 12 }
 
 def gfMask : UInt16 := OfNat.ofNat ((1 <<< 12) - 1)
 
 namespace GF
 
 instance (n:Nat) : OfNat GF n where
-  ofNat := ⟨UInt16.ofNat n &&& gfMask, sorry⟩
+  ofNat := ⟨UInt16.ofNat n &&& gfMask, UInt16.and_right_lt (by decide)⟩
 
 instance : Inhabited GF := ⟨OfNat.ofNat 0⟩
 
-protected def xor (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
+protected def xor (x y:GF) : GF := ⟨x.val ^^^ y.val, UInt16.xor_lt_both x.property y.property⟩
 
 -- This should compute x * y mod x^12 + x^3 + 1
 protected def red (tmp : UInt32) : GF :=
@@ -264,8 +186,15 @@ def loadGf {n} (r: ByteVec n) (i:Nat) : GF :=
 def loadGfArray {n:Nat} (r: ByteVec (2*n)) : Vector n GF :=
   Vector.generate n (λi => loadGf r (2*i.val))
 
-@[extern "lean_store_gf"]
-opaque store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t)
+def store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t) :=
+  ByteVec.generate (2*sys_t) λi =>
+    let idx := i.val >>> 1
+    let p : idx < sys_t := by admit
+    let gf := irr.get ⟨idx, p⟩
+    if i.val &&& 1 = 1 then
+      UInt8.ofNat ((gf.val >>> 8).toNat)
+    else
+      UInt8.ofNat (gf.val.toNat)
 
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
@@ -286,7 +215,7 @@ def layer (pi : Vector (1 <<< gfbits) GF) (cb : BitVec (1 <<< gfbits)) (s : Fin 
   cast h $
     concatVec $ Vector.generate (1 <<< (gfbits - (s+1))) λk =>
       let i := stride*k.val
-      let c  : BitVec (1 <<< si) := cb.extractN! i stride
+      let c  : BitVec (1 <<< si)    := cb.extractN! i stride
       let p1 : Vector (1 <<< si) GF := pi.extractN! (2*i) stride
       let p2 : Vector (1 <<< si) GF := pi.extractN! (2*i+stride) stride
       select c p2 p1 ++ select c p1 p2
@@ -301,12 +230,16 @@ def testPerm (out : ByteVec cond_bytes) :  Vector (1 <<< gfbits) GF := Id.run do
           BitVec.generate_msb (1 <<< gfbits) λi => (cb.get! (i.val/8)).testBit (i.val%8)
   let mut pi := Vector.generate n (λi => (OfNat.ofNat i.val : GF))
   for i in range 0 w do
-    let cb := out.get! i
-    pi := layer pi cb ⟨i, sorry⟩
+    have p : i < 2*w-1 := by admit
+    have q : i < gfbits := by admit
+    let cb := out.get ⟨i, p⟩
+    pi := layer pi cb ⟨i, q⟩
   for j in range 0 (w-1) do
-    let cb := out.get! (w+j)
+    have p : gfbits+j < 2*gfbits-1 := by admit
+    let cb := out.get ⟨gfbits+j, p⟩
     let i := (w - 2) - j
-    pi := layer pi cb ⟨i, sorry⟩
+    have q : i < gfbits := by admit
+    pi := layer pi cb ⟨i, q⟩
   pure pi
 
 def controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : Option (ByteVec cond_bytes) :=
@@ -359,7 +292,7 @@ def poly_full_mul {m n:Nat} {α:Type _} [Add α] [Mul α] [OfNat α 0] (x : Vect
   let _h : Inhabited α := ⟨0⟩
   for i in range 0 m do
     for j in range 0 n do
-      prod := prod.set! (i+j) (prod.get! (i+j) + x.get! i * y.get! j)
+      prod := prod.add! (i+j) (x.get! i * y.get! j)
   pure prod
 
 def GF_red (z : Vector (2*sys_t-1) GF) : Vector sys_t GF := Id.run do
@@ -445,17 +378,12 @@ def eval (f : Vector (sys_t+1) GF) (a : GF) : GF := Id.run do
   pure r
 
 def init_mat_row (inv : Vector N GF) (k : Nat) : BitVec N :=
-  BitVec.generate_msb N λi =>
-    let gf := inv.get i
-    gf.bit k
-
-def flatten [Inhabited α] (v : Vector m (Vector n α)) : Vector (m*n) α :=
-  Vector.generate (m*n) λi => (v.get! (i.val/n)).get! (i.val%n)
+  BitVec.generate_msb N λi => (inv.get i).bit k
 
 def init_mat (g : Vector sys_t GF) (L : Vector N GF) : Vector pk_nrows (BitVec N) := Id.run do
   let g' := g.push 1
   let inv0 := (λx => (eval g' x).inv) <$> L
-  flatten $
+  Vector.flatten $
     Vector.generate sys_t λi =>
       let inv := Vector.generate N λj =>
             inv0.get! j * exp (L.get! j) i
@@ -497,7 +425,7 @@ def mkPublicKey (g : Vector sys_t GF) (pi: Vector (1 <<< gfbits) GF) : Option Pu
   PublicKey.init <$> gaussian_elim (init_mat g L)
 
 def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := do
-  let g ← genPolyGen $ loadGfArray $ r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
+  let g ← genPolyGen $ loadGfArray $        r.extractN (N/8 + 4*(1 <<< gfbits)) (2*sys_t)
   let pi ← randomPermutation $ load4Array $ r.extractN (N/8) (4*(1 <<< gfbits))
   let cb ← controlBitsFromPermutation pi
   let pk ← mkPublicKey g pi
@@ -509,7 +437,7 @@ def tryCryptoKemKeypair (seed: ByteVec 32) (r: ByteVec rw) : Option KeyPair := d
             }
   some { pk := pk, sk := sk }
 
-def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyPair × DRBG) := do
+def mkCryptoKemKeypair [PRNG α] (prng:α) (attempts: optParam Nat 10) : Option (KeyPair × α) := do
   let rec loop : ByteVec 32 → Nat → Option KeyPair
       | _, 0 => none
       | seed, Nat.succ n => do
@@ -518,11 +446,10 @@ def mkCryptoKemKeypair (iseed : Seed) (attempts: optParam Nat 10) : Option (KeyP
         | some kp => some kp
         | none =>
           loop (r.takeFromEnd 32) n
-  let drbg := randombytesInit iseed
-  let (bytes, drbg) := randombytes drbg 32
+  let (bytes, prng) := PRNG.randombytes prng 32
   match loop bytes attempts with
   | none => none
-  | some p => some (p, drbg)
+  | some p => some (p, prng)
 
 def tryGenerateRandomErrors (v : Vector (2*sys_t) GF) (n:Nat) : Option (Vector n (Fin N)) := Id.run do
   let mut ind : Array (Fin N) := Array.mkEmpty sys_t
@@ -549,8 +476,8 @@ def generateErrorBitmask (a: Vector sys_t (Fin N)) : BitVec N := Id.run do
     e := e.msb_set! v.val true
   pure e
 
-def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
-  let (bytes, drbg) := randombytes drbg (4*sys_t)
+def tryGenerateErrors [PRNG α] (prng:α) : Option (BitVec N) × α := Id.run do
+  let (bytes, prng) := PRNG.randombytes prng (4*sys_t)
   let input : Vector (2*sys_t) GF := loadGfArray bytes
 
   let mut a : Array (Fin N) := Array.mkEmpty sys_t
@@ -562,9 +489,9 @@ def tryGenerateErrors (drbg:DRBG) : Option (BitVec N) × DRBG := Id.run do
       if eq:a.size = sys_t then
         let v : Vector sys_t (Fin N) := ⟨a, eq⟩
         if has_duplicate v then
-          return (none, drbg)
-        return (some (generateErrorBitmask v), drbg)
-  pure ⟨none, drbg⟩
+          return (none, prng)
+        return (some (generateErrorBitmask v), prng)
+  pure ⟨none, prng⟩
 
 def cSyndrome (pk : PublicKey) (e: BitVec N) : BitVec pk_nrows := Id.run do
   BitVec.generate_msb pk_nrows λi =>
@@ -587,7 +514,7 @@ protected def toString (c:Ciphertext) : String := c.bytes.toString
 instance : ToString Ciphertext := ⟨Ciphertext.toString⟩
 
 def mkHash (e:BitVec N) : ByteVec 32 :=
-  cryptoHash32b (ByteArray.fromList [2] ++ (bitvecToByteVec_msb (N/8) e).data)
+  shake 32 (ByteArray.fromList [2] ++ (bitvecToByteVec_msb (N/8) e).data)
 
 end Ciphertext
 
@@ -598,7 +525,7 @@ structure Plaintext where
 namespace Plaintext
 
 protected def bytes (p:Plaintext) :  ByteVec 32 :=
-  cryptoHash32b (ByteArray.fromList [1] ++ (bitvecToByteVec_msb (N/8) p.e).data ++ p.c.bytes.data)
+  shake 32 (ByteArray.fromList [1] ++ (bitvecToByteVec_msb (N/8) p.e).data ++ p.c.bytes.data)
 
 protected def toString (p:Plaintext) : String := p.bytes.toString
 
@@ -612,7 +539,7 @@ structure EncryptionResult where
 
 def EncryptionResult.ss (r:EncryptionResult) : Plaintext := { e := r.e, c := r.ct }
 
-def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × DRBG) := do
+def mkCryptoKemEnc [PRNG α] (drbg:α) (attempts:Nat) (pk:PublicKey) : Option (EncryptionResult × α) := do
   match tryN tryGenerateErrors drbg attempts with
   | (some e, drbg) =>
     let c   := { syndrome := cSyndrome pk e,
@@ -621,23 +548,15 @@ def mkCryptoKemEnc (drbg:DRBG) (attempts:Nat) (pk:PublicKey) : Option (Encryptio
     some ({ e := e, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
-@[extern "lean_transpose64"]
-opaque tranpose64 (a : @&(Vector 64 UInt64)) : Vector 64 UInt64
-
-def load4_64
-  (c : ByteVec 256)
-  : Vector 64 UInt64 :=
-  Vector.generate 64 $ λi => Id.run do
-    let mut r := 0
-    for j in range 0 4 do
-      r := (r <<< 8) ||| (c.get! (4*i+3-j)).toNat
-    pure $ UInt64.ofNat r
+def tranpose64 (a : Vector 64 (BitVec 64)) : Vector 64 (BitVec 64) :=
+  let f (i j : Fin 64) := (a.get j).get_lsb i
+  Vector.generate 64 (λi => BitVec.generate_lsb 64 (f i))
 
 def benes_layer
-  (data : @&(Vector 64 UInt64))
-  (bits : @&(Vector 32 UInt64))
-  (lgs : @&Nat)
-    : Vector 64 UInt64 := Id.run do
+  (data : Vector 64 (BitVec 64))
+  (bits : Vector 32 (BitVec 64))
+  (lgs : Nat)
+    : Vector 64 (BitVec 64) := Id.run do
   let s : Nat := 1 <<< lgs
   let mut data := data
   for h2 in range 0 (32 >>> lgs) do
@@ -649,47 +568,47 @@ def benes_layer
       data := data.xor! (j+s) d
   pure data
 
-def slice {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
-  ByteVec.generate n (λi => v.get! (l+i))
+def load4_64
+  (c : ByteVec 256)
+  : Vector 64 (BitVec 64) :=
+  Vector.generate 64 $ λi => Id.run do
+    let mut r := 0
+    for j in range 0 4 do
+      r := (r <<< 8) ||| (c.get! (4*i+3-j)).toNat
+    pure $ (UInt64.ofNat r).toBitVec
 
-def load8 (n:Nat) : UInt64 := Id.run do
-  let mut r := 0
-  for j in range 0 8 do
-    r := (r <<< 8) ||| ((n >>> (8*j)) &&& 0xff)
-  pure $ UInt64.ofNat r
-
-def load8_32 (c: ByteVec 256) : Vector 32 UInt64 :=
+def load8_32 (c: ByteVec 256) : Vector 32 (BitVec 64) :=
   Vector.generate 32 $ λi => Id.run do
     let mut r := 0
     for j in range 0 8 do
       r := (r <<< 8) ||| (c.get! (8*i+(7-j))).toNat
-    pure $ UInt64.ofNat r
+    pure $ (UInt64.ofNat r).toBitVec
 
-def apply_benes0 (a0 : Vector 64 UInt64)
+def apply_benes0 (a0 : Vector 64 (BitVec 64))
                  (c : ByteVec cond_bytes)
-    : Vector 64 UInt64 := Id.run do
+    : Vector 64 (BitVec 64) := Id.run do
   let inc := 256
 
   let mut a := a0
   a := tranpose64 a
   for l in range 0 6 do
-    let c := slice c (inc*l) inc
+    let c := c.extractN! (inc*l) inc
     let c := load4_64 c
     let c := tranpose64 c
     let c := Vector.generate 32 (λi => c.get! i)
     a := benes_layer a c l
   a := tranpose64 a
   for i in range 0 6 do
-    let c := slice c (inc*(6+i)) inc
+    let c := c.extractN! (inc*(6+i)) inc
     a := benes_layer a (load8_32 c) i
   for j in range 0 5 do
     let i := 4 - j
-    let c := slice c (inc*(16-i)) inc
+    let c := c.extractN! (inc*(16-i)) inc
     a := benes_layer a (load8_32 c) i
   a := tranpose64 a
   for j in range 0 6 do
     let l := 5 - j
-    let c := slice c (inc*(22-l)) inc
+    let c := c.extractN! (inc*(22-l)) inc
     let c := load4_64 c
     let c := tranpose64 c
     let c := Vector.generate 32 (λi => c.get! i)
@@ -697,15 +616,15 @@ def apply_benes0 (a0 : Vector 64 UInt64)
   pure <| tranpose64 a
 
 def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
-  let L : Vector gfbits (Vector 64 UInt64) :=
+  let L : Vector gfbits (Vector 64 (BitVec 64)) :=
         Vector.generate gfbits λj =>
           let r :=
             BitVec.generate_lsb (1 <<< gfbits) λ(i : Fin (1 <<< gfbits)) =>
               let i : GF := OfNat.ofNat i.val
               i.bit (11-j)
           let a0 :=
-            Vector.generate 64 (λi =>
-              UInt64.ofNat ((r.val >>> (64*i.val)) &&& (2^64 - 1)))
+            Vector.generate 64 (λ(i : Fin 64) =>
+              (UInt64.ofNat ((r.val >>> (64*i.val)) &&& (2^64 - 1))).toBitVec)
           apply_benes0 a0 c
   Vector.generate N λi0 => Id.run do
     let i  := i0.val / 64
@@ -713,7 +632,7 @@ def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
     let mut si : Nat := 0
     for k in range 0 gfbits do
       let r := L.get! (gfbits-1-k)
-      let e := ((r.get! i).toNat >>> m2) &&& 1
+      let e := ((r.get! i).toUInt64.toNat >>> m2) &&& 1
       si := si <<< 1 ||| e
     pure (OfNat.ofNat si)
 
@@ -783,7 +702,7 @@ def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
 -- make a public key from Goppa polynomial and permutation
 -- and use that to generate an encryption key result, then
 -- we can decrypt it.
-theorem decryptEncrypt (drbg drbg' : DRBG)
+theorem decryptEncrypt [PRNG α] (drbg drbg' : α)
                (attempts : Nat)
                (sk: SecretKey)
                (pk : PublicKey)
