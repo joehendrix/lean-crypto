@@ -19,6 +19,16 @@ def lsb_set! (x : BitVec m) (i : Nat) (c : Bool) : BitVec m :=
   else
     x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
 
+def msb_get! (x : BitVec m) (i : Nat) : Bool :=
+  (x.val &&& (1 <<< (m-1-i))) ≠ 0
+
+def msb_set! (x : BitVec m) (i : Nat) (c : Bool) : BitVec m :=
+  let i  := m-1-i
+  if c then
+    x ||| ⟨1 <<< i, sorry⟩
+  else
+    x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
+
 /--
 Update index to use most-significant bytes, but least-significant bit
 ordering within bytes.
@@ -92,6 +102,15 @@ protected def generate_lsb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run d
   for i in range 0 n do
     let b := f ⟨i, sorry⟩
     r := (if b then 1 <<< i else 0) ||| r
+
+  ⟨r, sorry⟩
+
+protected def generate_msb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run do
+  let mut r : Nat := 0
+
+  for i in range 0 n do
+    let b := f ⟨i, sorry⟩
+    r := r <<< 1 ||| (if b then 1 else 0)
 
   ⟨r, sorry⟩
 
