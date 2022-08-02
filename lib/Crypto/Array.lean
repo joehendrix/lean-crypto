@@ -40,11 +40,11 @@ theorem size_append {α:Type} : ∀(x y:Array α), (x ++ y).size = x.size + y.si
   simp only [HAppend.hAppend, Append.append, Array.append]
   simp only [foldl, foldlM]
   simp
-  have h : ∀{j k:Nat} (q : j+k = b.size) (r:Array α) (p: b.size ≤ b.size),
+  have h : ∀{j k:Nat} (_ : j+k = b.size) (r:Array α) (p: b.size ≤ b.size),
             size (Id.run (foldlM.loop (fun r v => push r v) b b.size p j k r))
               = r.size + j := by
     intro j k q r p
-    revert k r
+    revert k q r
     induction j with
     | zero =>
       intro k q r
@@ -103,8 +103,7 @@ theorem start_toSubarray_large {α:Type} (a:Array α) (start stop : Nat) (p : a.
       | inr h =>
         simp [h]
 
-@[simp]
-theorem stop_toSubarray_large {α:Type} (a:Array α) (start stop : Nat) (p : a.size ≤ start) (q : a.size ≤ stop)
+theorem stop_toSubarray_large {α:Type} (a:Array α) (start stop : Nat) (_ : a.size ≤ start) (q : a.size ≤ stop)
   : (toSubarray a start stop).stop = a.size := by
     simp only [toSubarray]
     cases Decidable.em (stop ≤ size a) with

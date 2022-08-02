@@ -109,4 +109,6 @@ def eq_add_implies_lt {x y z : Nat} (p : x + y.succ = z) : x < z := by
   simp only [Nat.succ_add]
   exact p
 
+theorem mul_div_lt {i m n:Nat} : i < m * n → (i/n) < m := by admit
+
 end Nat

@@ -6,6 +6,9 @@ import Smt.Data.BitVec
 
 namespace BitVec
 
+def get_lsb (x : BitVec m) (i : Fin m) : Bool :=
+  (x.val &&& (1 <<< i.val)) ≠ 0
+
 def lsb_getAux (x : BitVec m) (i : Nat) : Bool :=
   (x.val &&& (1 <<< i)) ≠ 0
 
@@ -18,6 +21,9 @@ def lsb_set! (x : BitVec m) (i : Nat) (c : Bool) : BitVec m :=
     x ||| ⟨1 <<< i, sorry⟩
   else
     x &&& ⟨((1 <<< m) - 1 - (1 <<< i)), sorry⟩
+
+def get_msb (x : BitVec m) (i : Fin m) : Bool :=
+  (x.val &&& (1 <<< (m-1-i.val))) ≠ 0
 
 def msb_get! (x : BitVec m) (i : Nat) : Bool :=
   (x.val &&& (1 <<< (m-1-i))) ≠ 0
@@ -110,4 +116,24 @@ protected def generate_msb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run d
 
   ⟨r, sorry⟩
 
+  def toUInt8  (x:BitVec  8) : UInt8  := OfNat.ofNat x.val
+  def toUInt16 (x:BitVec 16) : UInt16 := OfNat.ofNat x.val
+  def toUInt32 (x:BitVec 32) : UInt32 := OfNat.ofNat x.val
+  def toUInt64 (x:BitVec 64) : UInt64 := OfNat.ofNat x.val
 end BitVec
+
+namespace UInt8
+  def toBitVec (x:UInt8) : BitVec 8 := ⟨x.toNat, x.val.isLt⟩
+end UInt8
+
+namespace UInt16
+  def toBitVec (x:UInt16) : BitVec 16 := ⟨x.toNat, x.val.isLt⟩
+end UInt16
+
+namespace UInt32
+  def toBitVec (x:UInt32) : BitVec 32 := ⟨x.toNat, x.val.isLt⟩
+end UInt32
+
+namespace UInt64
+  def toBitVec (x:UInt64) : BitVec 64 := ⟨x.toNat, x.val.isLt⟩
+end UInt64

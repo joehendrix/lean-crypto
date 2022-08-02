@@ -11,7 +11,7 @@ def main (args:List String): IO Unit := do
       let mut seedArray : Array Seed := #[]
       let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write false
       for i in [0:10] do
-        let (seed, drbg2) := randombytes drbg0 48
+        let (seed, drbg2) := PRNG.randombytes drbg0 48
         drbg0 := drbg2
         fpReq.putStrLn s!"count = {i}"
         fpReq.putStrLn s!"seed = {seed.toHex}"
@@ -24,7 +24,7 @@ def main (args:List String): IO Unit := do
       fpRsp.putStrLn $ s!"# kem/{Mceliece.Ref348864.name}\n"
       for i in [0:10], seed in seedArray do
         let (key, drbg) ←
-              match Mceliece.Ref348864.mkCryptoKemKeypair seed with
+              match Mceliece.Ref348864.mkCryptoKemKeypair (randombytesInit seed) with
               | none => throw $ IO.userError "Key generation failed"
               | some p => pure p
         let enc ←

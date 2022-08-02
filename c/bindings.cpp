@@ -51,67 +51,6 @@ lean_obj_res lean_alloc_sarray1(unsigned elem_size, size_t size) {
     return lean_alloc_sarray(elem_size, size, size);
 }
 
-extern "C" LEAN_EXPORT lean_object * lean_alloc_mpz(mpz_t v);
-extern "C" LEAN_EXPORT void lean_extract_mpz_value(lean_object * o, mpz_t v);
-
-static lean_obj_res nat_import_from_bytes(size_t n, const unsigned char* a) {
-    if (n == 0)
-        return lean_box(0);
-    mpz_t r;
-    mpz_init2(r, 8*n);
-    mpz_import(r, n, 1, 1, -1, 0, a);
-
-    if (mpz_cmp_ui(r, LEAN_MAX_SMALL_NAT) <= 0) {
-        lean_obj_res o = lean_box(mpz_get_ui(r));
-        mpz_clear(r);
-        return o;
-    }
-    return lean_alloc_mpz(r);
-}
-
-static void nat_export_to_bytes(size_t n, unsigned char* a, b_lean_obj_arg x) {
-    if (n == 0)
-        return;
-    mpz_t xz;
-    if (lean_is_scalar(x)) {
-        mpz_init_set_ui(xz, lean_unbox(x));
-    } else {
-        mpz_init(xz);
-        lean_extract_mpz_value(x, xz);
-    }
-
-    size_t count;
-    mpz_export(a, &count, 1, 1, -1, 0, xz);
-    assert(count <= n);
-    if (count < n) {
-        memmove(a + (n-count), a, count);
-        memset(a, 0, n-count);
-    }
-    // Set remaining bits
-    mpz_clear(xz);
-}
-
-static void nat_export_to_bytes_lsb(size_t n, unsigned char* a, b_lean_obj_arg x) {
-    if (n == 0)
-        return;
-    mpz_t xz;
-    if (lean_is_scalar(x)) {
-        mpz_init_set_ui(xz, lean_unbox(x));
-    } else {
-        mpz_init(xz);
-        lean_extract_mpz_value(x, xz);
-    }
-
-    size_t count;
-    mpz_export(a, &count, -1, 1, -1, 0, xz);
-    assert(count <= n);
-    if (count < n) {
-        memmove(a + (n-count), a, count);
-        memset(a, 0, n-count);
-    }
-    // Set remaining bits
-    mpz_clear(xz);
-}
 
 # define AES_MAXNR 14
 
@@ -123,20 +62,9 @@ struct aes_key_st {
 
 typedef struct aes_key_st AES_KEY;
 
-extern "C" {
-int aesni_set_encrypt_key(const unsigned char *userKey, int bits, AES_KEY *key);
-
-void aesni_ecb_encrypt(const unsigned char *in,
-                       unsigned char *out,
-                       size_t length, const AES_KEY *key, int enc);
-
+extern "C"
 int AES_set_encrypt_key(const unsigned char *userKey, const int bits,
                         AES_KEY *key);
-
-void AES_ecb_encrypt(const unsigned char *in, unsigned char *out,
-                     const AES_KEY *key, const int enc);
-
-}
 
 extern "C"
 void AES_encrypt(const unsigned char *in, unsigned char *out,
@@ -162,23 +90,6 @@ extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v
     return buffer_obj;
 }
 
-inline static lean_obj_res lean_mk_option_none(void) {
-    return lean_alloc_ctor(0, 0, 0);
-}
-
-inline static lean_obj_res lean_mk_option_some(lean_obj_arg v) {
-    lean_object * r = lean_alloc_ctor(1, 1, 0);
-    lean_ctor_set(r, 0, v);
-    return r;
-}
-
-inline static lean_obj_res lean_mk_pair(b_lean_obj_arg x, b_lean_obj_arg y) {
-    lean_object * r = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(r, 0, x);
-    lean_ctor_set(r, 0, y);
-    return r;
-}
-
 extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in_obj) {
     if (LEAN_UNLIKELY(!lean_is_scalar(size_obj))) {
         lean_internal_panic_out_of_memory();
@@ -189,21 +100,6 @@ extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in
     shake(lean_sarray_cptr(r_obj), size, lean_sarray_cptr(in_obj), lean_sarray_size(in_obj));
 
     return r_obj;
-}
-
-extern "C" lean_obj_res lean_store_gf(b_lean_obj_arg irr_obj) {
-    assert(lean_array_size(irr_obj) == SYS_T);
-    gf irr[SYS_T];
-    init_gf_array(irr, irr_obj);
-
-    lean_obj_res sk_obj = lean_alloc_sarray1(1, 2 * SYS_T);
-    uint8_t* sk = lean_sarray_cptr(sk_obj);
-
-    // generating irreducible polynomial
-    for (size_t i = 0; i < SYS_T; i++)
-        store_gf(sk + i*2, irr[i]);
-
-    return sk_obj;
 }
 
 /* parameters: 1 <= w <= 14; n = 2^w */
@@ -397,96 +293,4 @@ extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) 
     }
 
     return out_obj;
-}
-
-/* input: in, a 64x64 matrix over GF(2) */
-/* output: out, transpose of in */
-static
-void my_transpose_64x64(uint64_t * out, uint64_t * in)
-{
-	int i, j, s, d;
-
-	uint64_t x, y;
-	uint64_t masks[6][2] = {
-	                        {0x5555555555555555, 0xAAAAAAAAAAAAAAAA},
-	                        {0x3333333333333333, 0xCCCCCCCCCCCCCCCC},
-	                        {0x0F0F0F0F0F0F0F0F, 0xF0F0F0F0F0F0F0F0},
-	                        {0x00FF00FF00FF00FF, 0xFF00FF00FF00FF00},
-	                        {0x0000FFFF0000FFFF, 0xFFFF0000FFFF0000},
-	                        {0x00000000FFFFFFFF, 0xFFFFFFFF00000000}
-	                       };
-
-	for (i = 0; i < 64; i++)
-		out[i] = in[i];
-
-	for (d = 5; d >= 0; d--)
-	{
-		s = 1 << d;
-
-		for (i = 0; i < 64; i += s*2)
-		for (j = i; j < i+s; j++)
-		{
-			x = (out[j] & masks[d][0]) | ((out[j+s] & masks[d][0]) << s);
-			y = ((out[j] & masks[d][1]) >> s) | (out[j+s] & masks[d][1]);
-
-			out[j+0] = x;
-			out[j+s] = y;
-		}
-	}
-}
-
-extern "C" lean_obj_res lean_transpose64(b_lean_obj_arg a_obj) {
-    assert(lean_array_size(a_obj) == 64);
-	uint64_t bs[64];
-	for (int i = 0; i < 64; i++) {
-        bs[i] = lean_unbox_uint64(lean_array_get_core(a_obj, i));
-	}
-
-	my_transpose_64x64(bs, bs);
-
-    lean_obj_res r_obj = lean_alloc_array(64, 64);
-	for (int i = 0; i < 64; i++) {
-        lean_array_set_core(r_obj, i, lean_box_uint64(bs[i]));
-	}
-    return r_obj;
-}
-
-extern "C" lean_obj_res lean_elt_from_bytevec(b_lean_obj_arg w_obj, b_lean_obj_arg r_obj, b_lean_obj_arg x_obj) {
-    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t w = lean_unbox(w_obj);
-
-    if (LEAN_UNLIKELY(!lean_is_scalar(r_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t r = lean_unbox(r_obj);
-    assert(r == 8*w);
-
-    assert(lean_sarray_size(x_obj) == w);
-    const uint8_t* x = lean_sarray_cptr(x_obj);
-
-    return nat_import_from_bytes(w, x);
-}
-
-extern "C" lean_obj_res lean_elt_to_bytevec(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
-    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t w = lean_unbox(w_obj);
-
-    lean_obj_res e_obj = lean_alloc_sarray1(1, w);
-    nat_export_to_bytes(w, lean_sarray_cptr(e_obj), x);
-    return e_obj;
-}
-
-extern "C" lean_obj_res lean_nat_to_bytevec_lsb(b_lean_obj_arg r_obj, b_lean_obj_arg w_obj, b_lean_obj_arg x) {
-    if (LEAN_UNLIKELY(!lean_is_scalar(w_obj))) {
-        lean_internal_panic_out_of_memory();
-    }
-    size_t w = lean_unbox(w_obj);
-
-    lean_obj_res e_obj = lean_alloc_sarray1(1, w);
-    nat_export_to_bytes_lsb(w, lean_sarray_cptr(e_obj), x);
-    return e_obj;
 }

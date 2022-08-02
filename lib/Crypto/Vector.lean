@@ -1,9 +1,9 @@
+-- This module introduces arrays with an explicit type parameter for storing length.
 import Crypto.Array
+import Crypto.Nat
+import Crypto.Range
 import Crypto.Hadamard
 
-/-
-This module introduces arrays with an explicit type parameter for storing length.
--/
 
 /--
 An array with explicit parameter for length.
@@ -29,22 +29,22 @@ def get {n:Nat} {α:Type _} (v:Vector n α) (i: Fin n) : α :=
   v.data.get ⟨i.val, p⟩
 
 def set! {n:Nat} {α:Type _} (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
-  { data := v.data.set! i e, size_proof := sorry }
+  { data := v.data.set! i e, size_proof := Eq.trans (Array.size_set! _) v.size_proof }
 
 def add! {n:Nat} {α:Type _} [Add α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
-  let h : Inhabited α := ⟨e⟩
-  { data := v.data.set! i (v.data.get! i + e), size_proof := sorry }
+  let _h : Inhabited α := ⟨e⟩
+  v.set! i (v.get! i + e)
 
 def sub! {n:Nat} {α:Type _} [Sub α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
-  let h : Inhabited α := ⟨e⟩
-  { data := v.data.set! i (v.data.get! i - e), size_proof := sorry }
+  let _h : Inhabited α := ⟨e⟩
+  v.set! i (v.get! i - e)
 
 def xor! {n:Nat} {α:Type _} [Xor α] (v:Vector n α) (i: Nat) (e:α) : Vector n α :=
-  let h : Inhabited α := ⟨e⟩
-  { data := v.data.set! i (v.data.get! i ^^^ e), size_proof := sorry }
+  let _h : Inhabited α := ⟨e⟩
+  v.set! i (v.get! i ^^^ e)
 
 protected
-def replicate {α : Type _} (n:Nat) (d:α): Vector n α  := Vector.generate n (λi => d)
+def replicate {α : Type _} (n:Nat) (d:α): Vector n α  := Vector.generate n (λ_ => d)
 
 instance (n:Nat) (α: Type _) [Inhabited α] : Inhabited (Vector n α) := ⟨Vector.replicate n default⟩
 
@@ -57,6 +57,16 @@ protected def map {n:Nat} {α β : Type _} (f : α → β) (v : Vector n α) : V
 instance : Functor (Vector n) where
   map := Vector.map
 
+-- `iterate n f b` returns a vector v where `v.get i` is equal to `f^i b`.
+def iterate (n:Nat) (f : α → α) (b:α) : Vector n α := Id.run do
+  let mut a := (Array.mkEmpty n).push b
+  let mut b := b
+  for i in range 1 n do
+    b := f b
+    a := a.push b
+  let p : a.size = n := by admit
+  ⟨a, p⟩
+
 protected
 def qsort {n : Nat} {α : Type _} [Inhabited α] (v:Vector n α) (lt : α → α → Bool) : Vector n α :=
   { data := Array.qsort v.data lt,
@@ -64,7 +74,7 @@ def qsort {n : Nat} {α : Type _} [Inhabited α] (v:Vector n α) (lt : α → α
   }
 
 theorem eq_of_val_eq {n:Nat} {α : Type _} : ∀ {x y : Vector n α}, Eq x.data y.data → Eq x y
-  | ⟨x,_⟩, _, rfl => rfl
+  | ⟨_,_⟩, _, rfl => rfl
 
 theorem ne_of_val_ne {n:Nat} {α : Type _} {i j : Vector n α} (h : Not (Eq i.data j.data)) : Not (Eq i j) :=
   λh' => absurd (h' ▸ rfl) h
@@ -127,5 +137,16 @@ def hadProd [h:HMul α β γ] (u:Vector n α) (v:Vector n β) : Vector n γ :=
 
 instance [HMul α β γ] : HadamardProduct (Vector n α) (Vector n β) (Vector n γ) where
   hadProd := Vector.hadProd
+
+def flatten (v : Vector m (Vector n α)) : Vector (m*n) α :=
+  Vector.generate (m*n) λi =>
+    have n_pos : 0 < n := by
+            have p := i.isLt
+            cases n with
+            | zero =>
+              contradiction
+            | succ x =>
+              exact (Nat.zero_lt_succ _)
+    (v.get ⟨i.val/n, Nat.mul_div_lt i.isLt⟩).get ⟨i.val%n, Nat.mod_lt _ n_pos⟩
 
 end Vector

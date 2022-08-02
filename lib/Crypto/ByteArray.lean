@@ -1,5 +1,4 @@
 import Crypto.Array
-import Crypto.ByteArray.ByteSubarray
 import Crypto.IsList
 import Crypto.List
 import Crypto.Nat
@@ -171,7 +170,7 @@ theorem size_extractN (a:ByteArray) (s n : Nat) : (a.extractN s n).size = n := b
     simp [h1, q]
 
 def generateAux {n:Nat} (f:Fin n → UInt8) : ∀(a:ByteArray) (j : Nat), a.size + j = n → ByteArray
-| a, 0, p => a
+| a, 0, _ => a
 | a, Nat.succ j, p =>
   let q : a.size < n := Nat.eq_add_implies_lt p
   let r : (a.push (f ⟨a.size, q⟩)).size + j = n := by
@@ -198,7 +197,7 @@ theorem size_generate (n:Nat) (f:Fin n → UInt8) : (generate n f).size = n := b
   exact (size_generateAux _ _ _)
 
 def generateMapAux {n:Nat} (f:Fin n → ByteArray) : ∀(a:ByteArray) (i j : Nat), i + j = n → ByteArray
-| a, i, 0, p => a
+| a, _, 0, _ => a
 | a, i, Nat.succ j, p =>
   have p2 : Nat.succ (j + i) = n := by
          simp [Nat.add_comm j i]
@@ -219,7 +218,7 @@ theorem size_generateMapAux_same {m n:Nat} (f:Fin n → ByteArray) (p : ∀(k:Fi
   revert a i h
   induction j with
   | zero =>
-    intros a i h
+    intros a _ _
     simp [generateMapAux]
   | succ j ind =>
     intros a i h
