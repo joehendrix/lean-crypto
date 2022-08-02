@@ -68,8 +68,24 @@ where go (p : Nat) : List GF2 :=
 def coeff (p : GF2Poly) (i : Nat) : GF2 :=
   (p.bits >>> i) &&& 1 == 1
 
-theorem coeff_eq_coeffs_get (p : GF2Poly) (i : Nat) : p.coeff i = p.coeffs.getD i 0 :=
-  sorry
+theorem coeff_eq_coeffs_get (p : GF2Poly) (i : Nat) : p.coeff i = p.coeffs.getD i 0 := by
+  unfold coeff
+  unfold coeffs
+  induction p.bits using Nat.strongInductionOn generalizing i with
+  | ind n ih =>
+    unfold coeffs.go
+    cases (inferInstance : Decidable (n = 0)) with
+    | isTrue hEq => simp [hEq, List.getD]
+    | isFalse hNe =>
+      have : n >>> 1 < n := by
+        rw [← Nat.div_two_pow_eq_shiftRight]
+        exact Nat.div_lt_self (Nat.zero_lt_of_ne_zero hNe) (Nat.lt_succ_self _)
+      cases (inferInstance : Decidable (i = 0)) with
+      | isTrue hEqI => simp [hNe, hEqI]
+      | isFalse hNeI =>
+        have hLe : 1 ≤ i :=
+          Nat.succ_le_of_lt (Nat.zero_lt_of_ne_zero hNeI)
+        simp [hNe, hNeI, ← ih _ this (i-1), Nat.add_comm 1 (i-1), Nat.sub_add_cancel hLe]
 
 instance : Repr GF2Poly where
   reprPrec p _ :=
@@ -105,6 +121,24 @@ def mul (p q : GF2Poly) : GF2Poly :=
 
 instance : Mul GF2Poly := ⟨mul⟩
 
+def mulCoeff (p q : GF2Poly) (i : Nat) : GF2 :=
+  /-
+  If    p(x) = a₀ + a₁x + … + a_wxʷ
+  and   q(x) = b₀ + b₁x + … + b_wxʷ
+  then  p(x)q(x) = c₀ + c₁x + … + c_wxʷ -/
+  coeffs p q i |>.foldl (init := 0) (· + ·)
+
+where
+  /-- cᵢ = a₀bᵢ + a₁bᵢ₋₁ + … + aᵢb₀ -/
+  coeffs (p q : GF2Poly) (i : Nat) : List GF2 :=
+    List.range i |>.map fun j =>
+      let pi := p.coeff j
+      let qi := q.coeff (i - j)
+      pi * qi
+
+theorem mul_coeff_eq_mulCoeff (p q : GF2Poly) : ∀ i, (p * q).coeff i = mulCoeff p q i :=
+  sorry
+
 theorem mul_degree (p q : GF2Poly) : (p * q).degree ≤ p.degree + q.degree := sorry
 
 def pow (p : GF2Poly) (n : Nat) : GF2Poly :=
@@ -132,36 +166,37 @@ def mod (p q : GF2Poly) : GF2Poly :=
 instance : Mod GF2Poly := ⟨mod⟩
 
 -- NOTE(WN): If implemented correctly, this should be ring-isomorphic to mathlib's `polynomial GF2`
-instance : CommRing GF2Poly where
-  add_zero           := sorry
-  zero_add           := sorry
-  add_comm           := sorry
-  add_assoc          := sorry
-  add_left_neg       := sorry
-  mul_zero           := sorry
-  zero_mul           := sorry
-  mul_one            := sorry
-  one_mul            := sorry
-  mul_comm           := sorry
-  mul_assoc          := sorry
-  left_distrib       := sorry
-  right_distrib      := sorry
-  npow_zero' n       := sorry
-  npow_succ' n x     := sorry
-  nsmul n p          := sorry
-  nsmul_zero'        := sorry
-  nsmul_succ' n x    := sorry
-  sub_eq_add_neg a b := sorry
-  gsmul n p          := sorry
-  gsmul_zero'        := sorry
-  gsmul_succ' n x    := sorry
-  gsmul_neg' n x     := sorry
-  natCast            := sorry
-  natCast_zero       := sorry
-  natCast_succ _     := sorry
-  intCast            := sorry
-  intCast_ofNat _    := sorry
-  intCast_negSucc _  := sorry
+-- https://github.com/leanprover/lean4/issues/1388
+-- instance : CommRing GF2Poly :=
+--   add_zero           := sorry
+--   zero_add           := sorry
+--   add_comm           := sorry
+--   add_assoc          := sorry
+--   add_left_neg       := sorry
+--   mul_zero           := sorry
+--   zero_mul           := sorry
+--   mul_one            := sorry
+--   one_mul            := sorry
+--   mul_comm           := sorry
+--   mul_assoc          := sorry
+--   left_distrib       := sorry
+--   right_distrib      := sorry
+--   npow_zero' n       := sorry
+--   npow_succ' n x     := sorry
+--   nsmul n p          := sorry
+--   nsmul_zero'        := sorry
+--   nsmul_succ' n x    := sorry
+--   sub_eq_add_neg a b := sorry
+--   gsmul n p          := sorry
+--   gsmul_zero'        := sorry
+--   gsmul_succ' n x    := sorry
+--   gsmul_neg' n x     := sorry
+--   natCast            := sorry
+--   natCast_zero       := sorry
+--   natCast_succ _     := sorry
+--   intCast            := sorry
+--   intCast_ofNat _    := sorry
+--   intCast_negSucc _  := sorry
 
 -- NOTE(WN): should also have EuclideanDomain GF2Poly
  

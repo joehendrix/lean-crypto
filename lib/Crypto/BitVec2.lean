@@ -2,63 +2,16 @@ import Crypto.Range
 import Crypto.UInt8
 import Crypto.ToMathlib
 
-/-!
-We define bitvectors in two variants - indexed and packed. The indexed variant is helpful
-for stating strongly-typed interfaces, whereas the packed one is better for stating some
-properties without the dependent index getting in the way.
--/
-
-def BitVec (w : Nat) := Fin (2^w)
-
-@[ext]
-structure BitVec.Packed where
-  width : Nat
-  data  : Fin (2^width)
+import Smt.Data.BitVec
 
 namespace BitVec
-namespace Packed
 
-@[ext]
-theorem ext' {a b : Packed} (hWidth : a.width = b.width)
-    (hData : a.data.val = b.data.val) : a = b := by
-  let ⟨aw, ad, _⟩ := a
-  let ⟨bw, bd, _⟩ := b
-  cases hWidth
-  cases hData
-  rfl
-
-end Packed
-
-protected def zero (w : Nat) : BitVec w :=
-  ⟨0, Nat.pos_pow_of_pos _ <| by decide⟩
-
-instance : Inhabited (BitVec w) := ⟨BitVec.zero w⟩
-
-protected def append (x : BitVec w) (y : BitVec v) : BitVec (w+v) :=
-  ⟨x.val <<< v ||| y.val, sorry⟩
-
-instance : HAppend (BitVec w) (BitVec v) (BitVec (w+v)) where
-  hAppend := BitVec.append
-
-protected def and (x y : BitVec w) : BitVec w :=
-  ⟨x.val &&& y.val, sorry⟩
-protected def or (x y : BitVec w) : BitVec w :=
-  ⟨x.val ||| y.val, sorry⟩
-protected def xor (x y : BitVec w) : BitVec w :=
-  ⟨x.val ^^^ y.val, sorry⟩
-protected def shiftLeft (x : BitVec w) (n : Nat) : BitVec w :=
-  Fin.ofNat' (x.val <<< n) (Nat.pos_pow_of_pos _ (by decide))
-protected def shiftRight (x : BitVec w) (n : Nat) : BitVec w :=
-  ⟨x.val >>> n, sorry⟩
-
-instance : AndOp (BitVec w) := ⟨BitVec.and⟩
-instance : OrOp (BitVec w) := ⟨BitVec.or⟩
-instance : Xor (BitVec w) := ⟨BitVec.xor⟩
-instance : HShiftLeft (BitVec w) Nat (BitVec w) := ⟨BitVec.shiftLeft⟩
-instance : HShiftRight (BitVec w) Nat (BitVec w) := ⟨BitVec.shiftRight⟩
-
-def lsb_get! (x : BitVec m) (i : Nat) : Bool :=
+def lsb_getAux (x : BitVec m) (i : Nat) : Bool :=
   (x.val &&& (1 <<< i)) ≠ 0
+
+@[implementedBy lsb_getAux]
+def lsb_get! (x : BitVec m) (i : Nat) : Bool :=
+  BitVec.lsbGet x i
 
 def lsb_set! (x : BitVec m) (i : Nat) (c : Bool) : BitVec m :=
   if c then

@@ -2,21 +2,11 @@ import Crypto.ToMathlib
 import Crypto.BitVec2
 import Crypto.GF2Poly
 
-/-! Concrete implementations of GF(2)[X] and GF(2^k) operations as Boolean circuits. -/
+import Smt.Tactic.WHNFSmt
 
-namespace BitVec
+/-! Concrete implementations of GF(2)[X] and GF(2^k) operations as bitvector circuits. -/
 
-instance : OfNat (BitVec w) (nat_lit 0) :=
-  ⟨BitVec.zero w⟩
-
-/-- Shrink or extend with zeros. -/
-def zeroShrinxtend (x : BitVec w) (v : Nat) : BitVec v :=
-  if h : w < v then ⟨x.val, Nat.lt_trans x.isLt sorry⟩
-  else ⟨x.val % (2^v), Nat.mod_lt _ sorry⟩
-
-end BitVec
-
-namespace GF2Poly
+namespace GF2BVPoly
 
 /-- Semantic interpretation of a bitvector as a polynomial. -/
 def interp (x : BitVec w) : GF2Poly :=
@@ -36,14 +26,18 @@ pmult x y = last zs
   where
     zs = [0] # [ (z << 1) ^ (if yi then 0 # x else 0) | yi <- y | z <- zs ]
 ``` -/
-def polyMul (a : BitVec w) (b : BitVec v) : BitVec (w+v) :=
+def polyMul (a : BitVec w) (b : BitVec v) : BitVec (w+v) := Id.run do
   let wOut := w + v
-  let a := a.zeroShrinxtend wOut
+  let_opaque a := a.zeroExtend wOut (Nat.le_add_right _ _)
+  let mut ret : BitVec wOut := 0
   -- fold over the bits of b starting at MSB
-  let ret : BitVec wOut := List.range v |>.foldr (init := 0) fun i acc =>
-    let acc' := acc <<< 1
-    if b.lsb_get! i then polyAdd acc' a else acc'
-  ret
+  for i in List.range v |>.reverse do
+    let_opaque tmp := ret <<< 1
+    opaque ret := if b.lsbGet i then polyAdd tmp a else tmp
+  return ret
+
+def reduce (a : BitVec v) (y : BitVec v) : BitVec v :=
+  if a.lsbGet v then polyAdd a y else a
 
 /-- Modulo operation in GF(2)[x] translated from Cryptol reference.
 
@@ -69,16 +63,16 @@ pmod x y = if y == 0 then 0/0 else last zs
 -/
 def polyMod (x : BitVec w) (y : BitVec (v+1)) : BitVec v :=
   if y = 0 then 0
-  else Id.run do
-    let mut ret : BitVec v := 0
-    let reduce (a : BitVec (v+1)) : BitVec (v+1) := if a.lsb_get! 7 /- HACK -/ then polyAdd a y else a
-    let mut pow : BitVec (v+1) := reduce ⟨1, by
-      show 1 * 2 ≤ 2^v * 2
-      exact Nat.mul_le_mul_right 2 <| Nat.succ_le_of_lt <| Nat.pos_pow_of_pos _ <| by decide⟩
-    for i in List.range w do
-      if x.lsb_get! i then ret := polyAdd ret (pow.zeroShrinxtend v)
-      pow := reduce (pow <<< 1)
-    return ret
+  else
+    let reduce (a : BitVec (v+1)) : BitVec (v+1) :=
+      if a.lsbGet v then polyAdd a y else a
+    let_opaque ret : BitVec v := 0
+    let_opaque pow : BitVec (v+1) := reduce (BitVec.ofNat (v+1) 1)
+    let (ret, _) := List.range w |>.foldl (init := (ret, pow)) fun (ret, pow) i =>
+      let_opaque ret := if x.lsbGet i then polyAdd ret (pow.shrink v) else ret
+      let_opaque pow := reduce (pow <<< 1)
+      (ret, pow)
+    ret
 
 section test
 
@@ -108,4 +102,54 @@ def e : BitVec 8 := ⟨0b10000011, by decide⟩
 
 end test
 
-end GF2Poly
+end GF2BVPoly
+
+/-! Finite field GF(2^8) -/
+
+/-- An element of the finite field GF(2^8) -/
+abbrev GF256 := BitVec 8
+
+namespace GF256
+
+open GF2BVPoly
+
+-- x⁸ + x⁴ + x³ + x + 1
+def irreducible : BitVec 9 := BitVec.ofNat 9 0b100011011
+
+def add (a b : GF256) : GF256 := polyAdd a b
+
+def addMany (as : Array GF256) : GF256 :=
+  as.foldl (init := BitVec.ofNat 8 0) add
+
+def mul (a b : GF256) : GF256 := polyMod (polyMul a b) irreducible
+
+def pow (k : Nat) (x : GF256) : GF256 :=
+  if hEq : k = 0 then BitVec.ofNat 8 1
+  else
+    have : k / 2 < k := Nat.div_lt_self (Nat.zero_lt_of_ne_zero hEq) (by decide)
+    if k % 2 = 0 then sq (pow (k / 2) x)
+    else mul x (sq (pow (k / 2) x))
+where
+  sq (x : GF256) := mul x x
+
+-- NOTE(WN): We have to define this because WHNFSmt reduction of `pow` is buggy
+-- and introduces WF encoding internals
+/-- `pow2 k = pow (2^k)` -/
+def pow2 (k : Nat) (x : GF256) : GF256 :=
+  if k = 0 then x
+  else
+    let_opaque v := pow2 (k-1) x
+    mul v v
+  
+def inverse (x : GF256) : GF256 :=
+  -- pow2 254 x
+  let v := pow2 7 x
+  let v := mul v (pow2 6 x)
+  let v := mul v (pow2 5 x)
+  let v := mul v (pow2 4 x)
+  let v := mul v (pow2 3 x)
+  let v := mul v (pow2 2 x)
+  let v := mul v (pow2 1 x)
+  v
+
+end GF256

@@ -8,28 +8,51 @@ lemma Nat.sub_lt_of_lt {n m k : Nat} (h : n < m) : n - k < m :=
 
 /-! Bitwise operations on Nat -/
 
+theorem Bool.beq_symm (a b : Bool) : (a == b) = (b == a) := by
+  cases a <;> cases b <;> rfl
+
+theorem Bool.bne_symm (a b : Bool) : (a != b) = (b != a) := by
+  simp [beq_symm, bne]
+
 namespace Nat
+
+theorem div_two_lt_self_of_ne_zero (hNe : n ≠ 0) : n / 2 < n :=
+  Nat.div_lt_self (Nat.zero_lt_of_ne_zero hNe) (Nat.lt_succ_self _)
+
+theorem bitwise_comm_of_comm (f : Bool → Bool → Bool) (hComm : ∀ x y, f x y = f y x) {a b : Nat}
+    : bitwise f a b = bitwise f b a := by
+  induction a using Nat.strongInductionOn generalizing b with
+  | ind a ih =>
+    unfold bitwise
+    cases (inferInstance : Decidable (a = 0)) with
+    | isTrue hEq => cases b <;> simp [hEq, hComm]
+    | isFalse hNe =>
+      have := div_two_lt_self_of_ne_zero hNe
+      simp [ih (a / 2) this, hNe, hComm]
+
+@[simp] theorem bitwise_bne_eq (a b : Nat) : bitwise bne a b = a ^^^ b := by rfl
 
 @[simp] theorem zero_xor (n : Nat) : 0 ^^^ n = n := by rfl
 @[simp] theorem xor_zero (n : Nat) : n ^^^ 0 = n := by cases n <;> rfl
 
 @[simp] theorem xor_self (n : Nat) : n ^^^ n = 0 := by
-  show Nat.bitwise bne n n = 0
   induction n using Nat.strongInductionOn with
   | ind n ih =>
-    unfold bitwise
     cases (inferInstance : Decidable (n = 0)) with
     | isTrue hEq => simp [hEq]
     | isFalse hNe =>
-      have hRec : bitwise bne (n / 2) (n / 2) = 0 :=
-        ih _ (Nat.div_lt_self (Nat.zero_lt_of_ne_zero hNe) (Nat.lt_succ_self _))
-      simp [hRec, hNe]
+      show bitwise bne n n = 0
+      unfold bitwise
+      simp (config := {zeta := false}) only [bitwise_bne_eq]
+      have := div_two_lt_self_of_ne_zero hNe
+      simp [ih (n / 2) this, hNe]
 
-theorem xor_comm (a b : Nat) : a ^^^ b = b ^^^ a := by
-  sorry
+theorem xor_comm (a b : Nat) : a ^^^ b = b ^^^ a :=
+  bitwise_comm_of_comm bne (Bool.bne_symm)
 
-theorem xor_assoc (a b c : Nat) : a ^^^ b ^^^ c = a ^^^ (b ^^^ c) := by
-  sorry
+@[simp] theorem zero_shr : 0 >>> n = 0 := sorry
+@[simp] theorem shr_zero : n >>> 0 = n := rfl
+@[simp] theorem shr_add (n k l : Nat) : n >>> k >>> l = n >>> (k + l) := sorry
 
 -- TODO(WN): @[csimp] would be nice
 theorem mul_two_pow_eq_shiftLeft (n k : Nat) : n * (2 ^ k) = n <<< k := by
@@ -101,6 +124,9 @@ theorem List.lt_of_mem_rangeModel : ∀ { i : Nat }, i ∈ rangeModel n → i < 
 theorem List.rangeModel_succ {n : Nat} : rangeModel (n+1) = rangeModel n ++ [n] := rfl
 
 /-! List lemmas -/
+
+@[simp] theorem List.getD_cons : List.getD (x :: xs) i d = if i = 0 then x else List.getD xs (i-1) d :=
+  sorry
 
 lemma List.foldl_ext (f g : α → β → α) (a : α)
   {l : List β} (H : ∀ a : α, ∀ b ∈ l, f a b = g a b) :

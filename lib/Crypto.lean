@@ -1,5 +1,7 @@
 import Crypto.Bool
 import Crypto.BitVec2
+import Crypto.GF2BV
+import Crypto.GF2Poly
 import Crypto.ByteBuffer
 import Crypto.ByteVec2
 import Crypto.Exp
@@ -132,7 +134,7 @@ opaque randombytesInit (s : Seed) : DRBG :=
   let b := ByteVec.generate _ (λi => b.get i ^^^ s.get i)
   { key := b.extractN 0 32, v := b.extractN 32 16 }
 
-private theorem randomBytesTerminates : ∀n, n ≥ 16 → n - 16 < n := sorry
+private theorem randomBytesTerminates : ∀ n, n ≥ 16 → n - 16 < n := sorry
 
 def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
    : ByteArray × ByteVec 16 :=
@@ -141,11 +143,11 @@ def randombytes3 (key : ByteVec 32) (v : ByteVec 16) (a : ByteArray) (n : Nat)
   else
     let v := incrementV v
     let b := aes256Ecb key v
-    if n ≥ 16 then
+    if h : n ≥ 16 then
+      have : n - 16 < n := randomBytesTerminates n ‹_›
       randombytes3 key v (a ++ b.data) (n - 16)
     else
       (a ++ b.data.extractN 0 n, v)
-  decreasing_by exact randomBytesTerminates _ ‹_›
 
 theorem randomBytes3_size (key) (v) (a) (n:Nat)
     : (randombytes3 key v a n).1.size = n := by
@@ -218,9 +220,9 @@ instance : ToString PublicKey := ⟨PublicKey.toString⟩
 end PublicKey
 
 @[reducible]
-def GF := { x:UInt16 // x < (1<<<12) }
+def GF := { x:UInt16 // x.val < (1<<<12) }
 
-def gfMask : UInt16 := (1 <<< 12) - 1
+def gfMask : UInt16 := UInt16.ofNat ((1 <<< 12) - 1)
 
 namespace GF
 
