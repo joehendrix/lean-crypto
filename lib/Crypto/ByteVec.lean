@@ -11,8 +11,6 @@ protected def get (x:ByteVec n) (i:Fin n) : UInt8 := x.data.get ⟨i.val, Eq.sub
 
 protected def get! (x:ByteVec n) (i:Nat) : UInt8 := x.data.get! i
 
-#print ByteArray.size_set!
-
 def set! (v : ByteVec n) (i : Nat) (e : UInt8) : ByteVec n :=
   { data := v.data.set! i e,
     size_proof := Eq.trans (ByteArray.size_set! v.data i e) v.size_proof }

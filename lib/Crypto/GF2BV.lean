@@ -1,5 +1,5 @@
 import Crypto.ToMathlib
-import Crypto.BitVec2
+import Crypto.BitVec
 import Crypto.GF2Poly
 
 import Smt.Tactic.WHNFSmt
@@ -140,7 +140,7 @@ def pow2 (k : Nat) (x : GF256) : GF256 :=
   else
     let_opaque v := pow2 (k-1) x
     mul v v
-  
+
 def inverse (x : GF256) : GF256 :=
   -- pow2 254 x
   let v := pow2 7 x
