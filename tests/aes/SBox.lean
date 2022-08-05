@@ -159,13 +159,13 @@ def invSbox : SmtArray (BitVec 8) (BitVec 8) :=
 
 -- The SubBytes transform and its inverse. One calculates, the other uses the lookup table
 def SubByte (b : GF256) : GF256 :=
-  xformByte (GF256.inverse b)
+  xformByte (GF256.inv' b)
 
 def SubByte' (b : GF256) : GF256 :=
   sbox.select b
 
 def InvSubByte (b : GF256) : GF256 :=
-  GF256.inverse (xformByte' b)
+  GF256.inv' (xformByte' b)
 
 def InvSubByte' (b : GF256) : GF256 :=
   invSbox.select b
@@ -178,88 +178,133 @@ theorem Array.foldl_nil : Array.foldl f init (Array.mkEmpty n) = init :=
 theorem Array.foldl_push (xs : Array α) : Array.foldl f init (xs.push x) = Array.foldl f (f init x) xs :=
   sorry
 
-open GF256
+open GaloisField2k GF2BVPoly
 
 set_option smt.solver.kind "z3" in
 theorem SubByte_eq_SubByte' (b : GF256) : SubByte b = SubByte' b := by
+  extract_def SubByte'
+    simp only [sbox, SmtArray.storeBv] at SubByte'.def
+    save
+
   extract_def SubByte
     extract_def xformByte
-      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight] at xformByte.def
+      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight]
+        at xformByte.def
       extract_def add
-        simp [GF2BVPoly.polyAdd] at GF256.add.def
-    extract_def inverse
-      extract_def pow2
+        specialize_def GaloisField2k.add [GF256]
+        save
+      conv at xformByte.def =>
+        intro b
+        -- TODO: repeat { rw } doesn't work
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+      save
+    
+    extract_def GF256.inv'
+      extract_def GF256.pow2
         extract_def mul
-          extract_def GF2BVPoly.polyMod
-          extract_def GF2BVPoly.polyMul
-          specialize_def GF2BVPoly.polyMod [16, 8]
+          specialize_def GaloisField2k.mul [GF256] blocking [@polyMod, @polyMul]
+          extract_def polyMod
+            specialize_def GF2BVPoly.polyMod [16, 8]
+            save
+
+          extract_def polyMul
+            specialize_def GF2BVPoly.polyMul [8, 8]
+            save
+
+          conv at GaloisField2k.mul.GF256.def =>
+            intro a b
+            rw [ GF2BVPoly.polyMul.«8».«8».specialization,
+              GF2BVPoly.polyMod.«16».«8».specialization ]
           save
-          specialize_def GF2BVPoly.polyMul [8, 8]
-          save
-          simp (config := {zeta := false}) only
-            [ GF2BVPoly.polyMul.«8».«8».specialization
-            , GF2BVPoly.polyMod.«16».«8».specialization
-            ]
-            at GF256.mul.def
-          save
-  extract_def SubByte'
-  simp only [sbox, SmtArray.storeBv] at SubByte'.def
-  save
+
+        conv at GF256.pow2.def =>
+          intro k x
+          rw [ GaloisField2k.mul.GF256.specialization ]
+        save
+      
+      conv at GF256.inv'.def =>
+        intro x
+        -- TODO: rw doesn't go under lets but simp hammer isn't ideal
+        simp (config := {zeta := false}) only
+          [ GaloisField2k.mul.GF256.specialization ]
+      save
 
   smt_show [
-    GF256,
-    GF256.irreducible,
-    GF256.inverse,
-    GF256.mul,
-    GF256.pow2,
     SubByte,
-    xformByte,
-    GF256.add,
     SubByte',
-    GF2BVPoly.polyMod.«16».«8»,
-    GF2BVPoly.polyMul.«8».«8»
-   ] 
+    xformByte,
+    GaloisField2k.add.GF256,
+    GF256.inv',
+    GF256.pow2,
+    GaloisField2k.mul.GF256,
+    GF2BVPoly.polyMul.«8».«8»,
+    GF2BVPoly.polyMod.«16».«8»
+  ] 
 
-  sorry
-
-set_option smt.solver.kind "z3" in
 theorem InvSubByte_eq_InvSubByte' (b : GF256) : InvSubByte b = InvSubByte' b := by
+  extract_def InvSubByte'
+    simp only [invSbox, SmtArray.storeBv] at InvSubByte'.def
+    save
+
   extract_def InvSubByte
     extract_def xformByte'
-      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight] at xformByte'.def
+      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight]
+        at xformByte'.def
       extract_def add
-        simp [GF2BVPoly.polyAdd] at GF256.add.def
-    extract_def inverse
-      extract_def pow2
+        specialize_def GaloisField2k.add [GF256]
+        save
+      conv at xformByte'.def =>
+        intro b
+        -- TODO: repeat { rw } doesn't work
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+        rw [GaloisField2k.add.GF256.specialization]
+      save
+    
+    extract_def GF256.inv'
+      extract_def GF256.pow2
         extract_def mul
-          extract_def GF2BVPoly.polyMod
-          extract_def GF2BVPoly.polyMul
-          specialize_def GF2BVPoly.polyMod [16, 8]
+          specialize_def GaloisField2k.mul [GF256] blocking [@polyMod, @polyMul]
+          extract_def polyMod
+            specialize_def GF2BVPoly.polyMod [16, 8]
+            save
+
+          extract_def polyMul
+            specialize_def GF2BVPoly.polyMul [8, 8]
+            save
+
+          conv at GaloisField2k.mul.GF256.def =>
+            intro a b
+            rw [ GF2BVPoly.polyMul.«8».«8».specialization,
+              GF2BVPoly.polyMod.«16».«8».specialization ]
           save
-          specialize_def GF2BVPoly.polyMul [8, 8]
-          save
-          simp (config := {zeta := false}) only
-            [ GF2BVPoly.polyMul.«8».«8».specialization
-            , GF2BVPoly.polyMod.«16».«8».specialization
-            ]
-            at GF256.mul.def
-          save
-  extract_def InvSubByte'
-  simp only [invSbox, SmtArray.storeBv] at InvSubByte'.def
-  save
+
+        conv at GF256.pow2.def =>
+          intro k x
+          rw [ GaloisField2k.mul.GF256.specialization ]
+        save
+      
+      conv at GF256.inv'.def =>
+        intro x
+        -- TODO: rw doesn't go under lets but simp hammer isn't ideal
+        simp (config := {zeta := false}) only
+          [ GaloisField2k.mul.GF256.specialization ]
+      save
 
   smt_show [
-    GF256,
-    GF256.irreducible,
-    GF256.inverse,
-    GF256.mul,
-    GF256.pow2,
     InvSubByte,
-    xformByte',
-    GF256.add,
     InvSubByte',
-    GF2BVPoly.polyMod.«16».«8»,
-    GF2BVPoly.polyMul.«8».«8»
-   ] 
-
-  sorry
+    xformByte',
+    GaloisField2k.add.GF256,
+    GF256.inv',
+    GF256.pow2,
+    GaloisField2k.mul.GF256,
+    GF2BVPoly.polyMul.«8».«8»,
+    GF2BVPoly.polyMod.«16».«8»
+  ] 
