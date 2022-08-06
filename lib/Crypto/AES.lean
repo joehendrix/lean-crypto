@@ -104,7 +104,7 @@ def RoundKey := State
 def KeySchedule := RoundKey × { k : Array RoundKey // k.size + 1 = numRounds } × RoundKey
 
 def GF256.dotProduct (a b : Array GF256) : GF256 :=
-  addMany (a.zip b |>.map fun (a, b) => mul a b)
+  GaloisField2k.addMany (a.zip b |>.map fun (a, b) => a * b)
 
 -- Computable theory of modules over fields would be nicer
 def GF256.vectorMul (v : Array GF256) (M : Array (Array GF256)) : Array GF256 :=

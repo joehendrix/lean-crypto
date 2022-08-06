@@ -4,5 +4,5 @@
    "rev": "7da24c4024a2cb547d9d6e85943027daa77d850f",
    "name": "mathlib"},
   {"url": "https://github.com/Vtec234/lean-smt",
-   "rev": "d658a57d42ecc4450d585403953c9058874b1565",
+   "rev": "e9fd06b2d6baabdadc7aee25c4cf7bcbee564ea2",
    "name": "smt"}]}
