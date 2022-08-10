@@ -224,7 +224,7 @@ def testPerm (out : ByteVec cond_bytes) :  Vector (1 <<< gfbits) GF := Id.run do
   let w  := gfbits
   let n  := 1 <<< gfbits
   let n4 := n >>> 4
-  let out :=
+  let out : Vector (2*gfbits-1) (BitVec (1 <<< gfbits))  :=
         Vector.generate (2*w-1) λi =>
           let cb := out.extractN (n4 * i) n4
           BitVec.generate_msb (1 <<< gfbits) λi => (cb.get! (i.val/8)).testBit (i.val%8)
@@ -548,74 +548,87 @@ def mkCryptoKemEnc [PRNG α] (drbg:α) (attempts:Nat) (pk:PublicKey) : Option (E
     some ({ e := e, ct := c }, drbg)
   | (none, _) => panic! "mkCryptoKemEnc def failure"
 
-def tranpose64 (a : Vector 64 (BitVec 64)) : Vector 64 (BitVec 64) :=
-  let f (i j : Fin 64) := (a.get j).get_lsb i
-  Vector.generate 64 (λi => BitVec.generate_lsb 64 (f i))
+def concatBitvec (v: Vector m (BitVec n)) : BitVec (m*n) := Id.run do
+  let mut r : Nat := 0
+  for i in range 0 m do
+    r := r <<< n + (v.get! i).val
+  ⟨r, sorry⟩
+
+
+def unconcatBitvec! (m n : Nat) (v: BitVec r) : Vector m (BitVec n) :=
+  Vector.generate m (λi => v.extractN! (i.val*n) n)
+
+def transpose64 (a : BitVec (64*64)) : BitVec (64*64) :=
+  BitVec.generate_msb (64*64) (λi =>
+    let j := i.val / 64
+    let k := i.val % 64
+    a.msb_get! (64 * (63-k) + (63-j)))
 
 def benes_layer
-  (data : Vector 64 (BitVec 64))
-  (bits : Vector 32 (BitVec 64))
+  (data : BitVec (64*64))
+  (bits : BitVec (32*64))
   (lgs : Nat)
-    : Vector 64 (BitVec 64) := Id.run do
+    : BitVec (64*64) :=
   let s : Nat := 1 <<< lgs
-  let mut data := data
-  for h2 in range 0 (32 >>> lgs) do
-    let h := h2 <<< lgs
-    for k in range 0 s do
-      let j := 2 * h + k
-      let d := (data.get! j ^^^ data.get! (j+s)) &&& bits.get! (h+k)
-      data := data.xor! j d
-      data := data.xor! (j+s) d
-  pure data
+
+  let data_l : Vector (32 >>> lgs) (BitVec (s*64)) :=
+        Vector.generate (32 >>> lgs) (λh2 => data.extractN! ((s*64)*2*h2.val)     (s*64))
+  let data_h : Vector (32 >>> lgs) (BitVec (s*64)) :=
+        Vector.generate (32 >>> lgs) (λh2 => data.extractN! ((s*64)*(2*h2.val+1)) (s*64))
+
+  let b3 : Vector (32 >>> lgs) (BitVec (s*64)) :=
+        Vector.generate (32 >>> lgs) (λh2 => bits.extractN! ((s*64)*h2.val) (s*64))
+
+  let res_v : Vector (32 >>> lgs) (BitVec (s*64+s*64)) :=
+        Vector.generate (32 >>> lgs) (λh2 =>
+          let d3 := data_l.get h2
+          let d4 := data_h.get h2
+          let p2 : BitVec (s*64) := (d3 ^^^ d4) &&& (b3.get h2)
+          let d1 : BitVec (s*64) := d3 ^^^ p2
+          let d2 : BitVec (s*64) := d4 ^^^ p2
+          BitVec.append d1 d2)
+  let r := concatBitvec res_v
+  ⟨r.val, sorry⟩
 
 def load4_64
   (c : ByteVec 256)
-  : Vector 64 (BitVec 64) :=
-  Vector.generate 64 $ λi => Id.run do
+  : BitVec 2048 :=
+  let b := transpose64 (concatBitvec (Vector.generate 64 $ λi => Id.run do
     let mut r := 0
     for j in range 0 4 do
       r := (r <<< 8) ||| (c.get! (4*i+3-j)).toNat
-    pure $ (UInt64.ofNat r).toBitVec
+    pure $ (UInt64.ofNat r).toBitVec))
+  b.extractN! 0 2048
 
-def load8_32 (c: ByteVec 256) : Vector 32 (BitVec 64) :=
-  Vector.generate 32 $ λi => Id.run do
+def load8_32 (c: ByteVec 256) : BitVec 2048 :=
+  @concatBitvec 32 64 (Vector.generate 32 $ λi => Id.run do
     let mut r := 0
     for j in range 0 8 do
       r := (r <<< 8) ||| (c.get! (8*i+(7-j))).toNat
-    pure $ (UInt64.ofNat r).toBitVec
+    pure $ (UInt64.ofNat r).toBitVec)
 
-def apply_benes0 (a0 : Vector 64 (BitVec 64))
-                 (c : ByteVec cond_bytes)
-    : Vector 64 (BitVec 64) := Id.run do
-  let inc := 256
-
+def apply_benes0 (a0 : BitVec (64*64))
+                 (d : Vector 23 (ByteVec 256))
+    : BitVec (64*64) := Id.run do
   let mut a := a0
-  a := tranpose64 a
+  a := transpose64 a
   for l in range 0 6 do
-    let c := c.extractN! (inc*l) inc
-    let c := load4_64 c
-    let c := tranpose64 c
-    let c := Vector.generate 32 (λi => c.get! i)
-    a := benes_layer a c l
-  a := tranpose64 a
-  for i in range 0 6 do
-    let c := c.extractN! (inc*(6+i)) inc
-    a := benes_layer a (load8_32 c) i
-  for j in range 0 5 do
-    let i := 4 - j
-    let c := c.extractN! (inc*(16-i)) inc
-    a := benes_layer a (load8_32 c) i
-  a := tranpose64 a
-  for j in range 0 6 do
-    let l := 5 - j
-    let c := c.extractN! (inc*(22-l)) inc
-    let c := load4_64 c
-    let c := tranpose64 c
-    let c := Vector.generate 32 (λi => c.get! i)
-    a := benes_layer a c l
-  pure <| tranpose64 a
+    a := benes_layer a (load4_64 (d.get! l)) l
+  a := transpose64 a
+  for l in range 0 6 do
+    let c := d.get! (6+l)
+    a := benes_layer a (load8_32 c) l
+  for l in range 0 5 do
+    let l := 4 - l
+    let c := d.get! (16-l)
+    a := benes_layer a (load8_32 c) l
+  a := transpose64 a
+  for l in range 0 6 do
+    let l := 5 - l
+    a := benes_layer a (load4_64 (d.get! (22-l))) l
+  pure <| transpose64 a
 
-def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
+def support_gen (d : Vector 23 (ByteVec 256)) : Vector N GF := Id.run do
   let L : Vector gfbits (Vector 64 (BitVec 64)) :=
         Vector.generate gfbits λj =>
           let r :=
@@ -623,9 +636,9 @@ def support_gen (c : ByteVec cond_bytes) : Vector N GF := Id.run do
               let i : GF := OfNat.ofNat i.val
               i.bit (11-j)
           let a0 :=
-            Vector.generate 64 (λ(i : Fin 64) =>
-              (UInt64.ofNat ((r.val >>> (64*i.val)) &&& (2^64 - 1))).toBitVec)
-          apply_benes0 a0 c
+            concatBitvec (Vector.generate 64 (λ(i : Fin 64) =>
+              (UInt64.ofNat ((r.val >>> (64*i.val)) &&& (2^64 - 1))).toBitVec))
+          unconcatBitvec! 64 64 (apply_benes0 a0 d)
   Vector.generate N λi0 => Id.run do
     let i  := i0.val / 64
     let m2 := i0.val % 64
@@ -681,7 +694,9 @@ def bm
 -- Decrypt the N-bit vector created by mkCryptoKemEnc
 def cryptoKemDec1 (c : Ciphertext) (sk : SecretKey) : Option (BitVec N) := do
   let g := sk.goppa
-  let l : Vector N GF := support_gen sk.controlbits
+  let d : Vector 23 (ByteVec 256) := Vector.generate _ λ(i: Fin 23) =>
+        sk.controlbits.extractN! (256*i.val) 256
+  let l : Vector N GF := support_gen d
   let r : BitVec N := c.syndrome ++ BitVec.zero (N-pk_nrows)
   let s := synd g l r
   let locator := bm s

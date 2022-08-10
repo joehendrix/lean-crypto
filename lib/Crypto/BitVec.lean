@@ -120,6 +120,19 @@ protected def generate_msb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run d
   def toUInt16 (x:BitVec 16) : UInt16 := OfNat.ofNat x.val
   def toUInt32 (x:BitVec 32) : UInt32 := OfNat.ofNat x.val
   def toUInt64 (x:BitVec 64) : UInt64 := OfNat.ofNat x.val
+
+  protected def toString {n:Nat} (x:BitVec n) : String :=
+    if n % 16 = 0 then
+      let s := (Nat.toDigits 16 x.val).asString
+      let t := (List.repeat' '0' (n / 16 - s.length)).asString
+      "0x" ++ t ++ s
+    else
+      let s := (Nat.toDigits 2 x.val).asString
+      let t := (List.repeat' '0' (n - s.length)).asString
+      "0b" ++ t ++ s
+
+  instance : ToString (BitVec n) := ⟨BitVec.toString⟩
+
 end BitVec
 
 namespace UInt8
