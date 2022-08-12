@@ -3,7 +3,7 @@ import Smt
 
 /-! Optimized Galois field operations in McEliece are the same as generic reference algorithm. -/
 
-open Mceliece348864Ref
+namespace Mceliece.Ref348864
 
 def GF4096 : GaloisField2k where
   k := 12
@@ -117,7 +117,7 @@ example (x y : GF) : GF4096.ofGF (x * y) = (GF4096.ofGF x) * (GF4096.ofGF y) := 
   sorry
 
 #exit -- times out below
-    
+
   extract_def polyMod
   specialize_def GF2BVPoly.polyMod [24, 12]
   save

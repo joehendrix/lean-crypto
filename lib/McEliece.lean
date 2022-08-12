@@ -11,7 +11,7 @@ def main (args:List String): IO Unit := do
       let mut seedArray : Array Seed := #[]
       let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write false
       for i in [0:10] do
-        let (seed, drbg2) := randombytes drbg0 48
+        let (seed, drbg2) := PRNG.randombytes drbg0 48
         drbg0 := drbg2
         fpReq.putStrLn s!"count = {i}"
         fpReq.putStrLn s!"seed = {seed.toHex}"
@@ -21,17 +21,17 @@ def main (args:List String): IO Unit := do
         fpReq.putStrLn "ss =\n"
         seedArray := seedArray.push seed
       let fpRsp ← IO.FS.Handle.mk rspPath IO.FS.Mode.write false
-      fpRsp.putStrLn $ s!"# kem/{Mceliece348864Ref.name}\n"
+      fpRsp.putStrLn $ s!"# kem/{Mceliece.Ref348864.name}\n"
       for i in [0:10], seed in seedArray do
         let (key, drbg) ←
-              match Mceliece348864Ref.mkCryptoKemKeypair seed with
+              match Mceliece.Ref348864.mkCryptoKemKeypair (randombytesInit seed) with
               | none => throw $ IO.userError "Key generation failed"
               | some p => pure p
         let enc ←
-              match Mceliece348864Ref.mkCryptoKemEnc drbg 20 key.pk with
+              match Mceliece.Ref348864.mkCryptoKemEnc drbg 20 key.pk with
               | none => throw $ IO.userError "Encryption key generation failed."
               | some (enc, _drbg) => pure enc
-        match Mceliece348864Ref.cryptoKemDec enc.ct key.sk with
+        match Mceliece.Ref348864.cryptoKemDec enc.ct key.sk with
         | none =>
           throw $ IO.userError "crypto_kem_dec failed."
         | some expected =>

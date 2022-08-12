@@ -11,8 +11,6 @@ protected def get (x:ByteVec n) (i:Fin n) : UInt8 := x.data.get ⟨i.val, Eq.sub
 
 protected def get! (x:ByteVec n) (i:Nat) : UInt8 := x.data.get! i
 
-#print ByteArray.size_set!
-
 def set! (v : ByteVec n) (i : Nat) (e : UInt8) : ByteVec n :=
   { data := v.data.set! i e,
     size_proof := Eq.trans (ByteArray.size_set! v.data i e) v.size_proof }
@@ -117,6 +115,9 @@ def ofUInt64lsb (v:UInt64) : ByteVec 8 :=
 
 protected def toHex {n:Nat} (a:ByteVec n) : String :=
   a.data.foldl (λs b => s ++ b.toHex) ""
+
+def extractN! {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
+  ByteVec.generate n (λi => v.get! (l+i))
 
 end ByteVec
 
