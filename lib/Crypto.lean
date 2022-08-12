@@ -217,22 +217,23 @@ instance : Inhabited GF := ⟨OfNat.ofNat 0⟩
 
 protected def xor  (x y:GF) : GF := ⟨x.val ^^^ y.val, sorry⟩
 
--- This should compute x * y mod x^12 + x^3 + 1
-protected def red (tmp : Nat) : GF :=
+-- This should compute x mod x^12 + x^3 + 1
+protected def red (tmp : UInt32) : GF :=
   let t := tmp &&& 0x7fc000
   let tmp := tmp ^^^ (t >>> 9) ^^^ (t >>> 12)
   let t := tmp &&& 0x3000
   let tmp := tmp ^^^ (t >>> 9) ^^^ (t >>> 12)
-  OfNat.ofNat tmp
+  ⟨tmp.toUInt16 &&& gfMask, sorry⟩
 
 -- This computes (x * y) mod x^12 + x^3 + 1
 protected def mul (x y : GF) : GF := Id.run do
-  let x : Nat := x.val.toNat
-  let y : Nat := y.val.toNat
-  let mut tmp : Nat := 0
-  for i in range 0 12 do
-    tmp := tmp ^^^ (x * (y &&& (1 <<< i)))
-  pure (GF.red tmp)
+  let x : UInt32 := x.val.toUInt32
+  let y : UInt32 := y.val.toUInt32
+  let mut tmp : UInt32 := 0
+  for i in [0:12] do
+    let mask : UInt32 := 1 <<< (UInt32.ofNat i)
+    opaque tmp := tmp ^^^ (x * (y &&& mask))
+  return GF.red tmp
 
 instance : Xor GF := ⟨GF.xor⟩
 instance : Add GF := ⟨GF.xor⟩
@@ -241,7 +242,7 @@ instance : Mul GF := ⟨GF.mul⟩
 
 -- This computes (x * x) mod x^12 + x^3 + 1
 def sq (x:GF) : GF :=
-  let x := x.val.toNat
+  let x := x.val.toUInt32
   let x := (x ||| (x <<< 8)) &&& 0x00FF00FF
   let x := (x ||| (x <<< 4)) &&& 0x0F0F0F0F
   let x := (x ||| (x <<< 2)) &&& 0x33333333

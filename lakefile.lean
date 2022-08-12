@@ -1,51 +1,58 @@
 import Lake
 open System Lake DSL
 
-def cDir : FilePath := "c"
-def libDir : FilePath := "lib"
-def buildDir := defaultBuildDir
+def cDir : FilePath := __dir__ / "c"
+def buildDir := __dir__ / defaultBuildDir
+def buildCDir := buildDir / "c"
+def buildLibDir := buildDir / "lib"
 
-def ffiOTarget (pkgDir srcPath : FilePath) (compiler: FilePath) (deps : List FileTarget) (opts : Array String) : FileTarget :=
-  let oFile := pkgDir / buildDir / srcPath.withExtension "o"
-  let src := pkgDir / srcPath
-  fileTargetWithDepList oFile ((inputFileTarget <| src) :: deps) fun _ => do
-    compileO oFile src opts compiler
+package LeanCrypto where
+  -- customize layout
+  srcDir := "lib"
+  moreLeancArgs := #["-O3"]
+  -- Setting this to `true` produces `libCrypto` which conflicts on case-insensitive filesystems
+  -- with `libcrypto` produced from OpenSSL.
+  precompileModules := false
+
+/-- Given a source path relative to `cDir`, build the corresponding `.o` in `buildCDir`. -/
+def ffiOTarget (srcPath : FilePath) (compiler: FilePath) (deps : List (BuildJob FilePath))
+    (opts : Array String) : IndexBuildM (BuildJob FilePath) := do
+  let oFile := buildCDir / srcPath.withExtension "o"
+  let src := cDir / srcPath
+  buildFileAfterDepList oFile ((← inputFile src) :: deps) fun _ => do
+    compileO oFile.toString oFile src opts compiler
 
 def includeFlag (path:FilePath) : String := "-I" ++ path.toString
 
-def bindingsTarget (pkgDir : FilePath) : FileTarget  :=
-  let oFile := pkgDir / buildDir / cDir / "bindings.o"
-  let srcTarget := inputFileTarget <| pkgDir / cDir / "bindings.cpp"
-  fileTargetWithDep oFile srcTarget fun srcFile => do
-    IO.println $ "Lean: " ++ (← getLeanIncludeDir).toString
-    compileO oFile srcFile
-      #["-O3",
-        "-DKATNUM=10",
-        includeFlag (pkgDir / cDir / "openssl" / "include"),
-        includeFlag (pkgDir / cDir / "keccak" / "include"),
-        includeFlag (pkgDir / cDir / "mceliece348864"),
-        includeFlag (← getLeanIncludeDir)]
-      "c++"
+target bindingsTarget : FilePath := do
+  -- IO.println $ "Lean: " ++ (← getLeanIncludeDir).toString
+  ffiOTarget "bindings.cpp" "c++" []
+    #["-O3",
+      "-DKATNUM=10",
+      includeFlag (cDir / "openssl" / "include"),
+      includeFlag (cDir / "keccak" / "include"),
+      includeFlag (cDir / "mceliece348864"),
+      includeFlag (← getLeanIncludeDir)]
 
 def mcelieceFiles : Array FilePath :=
   #[ "gf.c", "util.c" ]
 
-def mcelieceTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
-  let src := cDir / "mceliece348864" / srcPath
-  ffiOTarget pkgDir src "cc" []
+def mcelieceTarget (srcPath : FilePath) : IndexBuildM (BuildJob FilePath) :=
+  let src := "mceliece348864" / srcPath
+  ffiOTarget src "cc" []
      #["-O3",
        "-DKATNUM=10",
        "-DCRYPTO_NAMESPACE(x)=x",
-       includeFlag (pkgDir / cDir / "mceliece348864"),
+       includeFlag (cDir / "mceliece348864"),
 --       includeFlag "/usr/local/Cellar/openssl@1.1/1.1.1l_1/include",
-       includeFlag (pkgDir / cDir / "keccak" / "include"),
-       includeFlag (pkgDir / cDir / "openssl" / "include")
-       ]
+       includeFlag (cDir / "keccak" / "include"),
+       includeFlag (cDir / "openssl" / "include")]
 
-extern_lib libmceliece348864 :=
-  let libFile := __dir__ / buildDir / libDir / "libmceliece348864.a"
-  let dependencies := mcelieceFiles.map (mcelieceTarget __dir__)
-  staticLibTarget libFile (dependencies ++ [bindingsTarget __dir__])
+extern_lib libmceliece348864 (pkg : Package) := do
+  let libFile := buildLibDir / "libmceliece348864.a"
+  let dependencies ← mcelieceFiles.mapM mcelieceTarget
+  let bindings ← fetch (pkg.target ``bindingsTarget)
+  buildStaticLib libFile (dependencies.push bindings)
 
 def keccakFiles : Array FilePath :=
   let base : FilePath := "keccak"
@@ -57,16 +64,15 @@ def keccakFiles : Array FilePath :=
      base / "SnP" / "KeccakP-1600" / "Reference" / "KeccakP-1600-reference.c"
    ]
 
-def keccakTarget (pkgDir : FilePath) (srcPath : FilePath) : FileTarget :=
-  let src := cDir / srcPath
-  let commonIncPath := pkgDir / cDir / "keccak" / "Common"
-  let incPath := pkgDir / cDir / "keccak" / "include" / "libkeccak.a.headers"
-  ffiOTarget pkgDir src "cc" [] #["-O3", includeFlag incPath, includeFlag commonIncPath ]
+def keccakTarget (srcPath : FilePath) : IndexBuildM (BuildJob FilePath) :=
+  let commonIncPath := cDir / "keccak" / "Common"
+  let incPath := cDir / "keccak" / "include" / "libkeccak.a.headers"
+  ffiOTarget srcPath "cc" [] #["-O3", includeFlag incPath, includeFlag commonIncPath]
 
-extern_lib libkeccak :=
-  let libFile := __dir__ / buildDir / libDir / "libkeccak.a"
-  let dependencies := keccakFiles.map (keccakTarget __dir__)
-  staticLibTarget libFile dependencies
+extern_lib libkeccak := do
+  let libFile := buildLibDir / "libkeccak.a"
+  let dependencies ← keccakFiles.mapM keccakTarget
+  buildStaticLib libFile dependencies
 
 --"-arch x86_64",
 
@@ -75,39 +81,27 @@ def opensslDefFlags : Array String :=
       "-Wall"
     ]
 
-def opensslTarget (pkgDir : FilePath) (srcPath : FilePath) (extraOps : optParam (Array String) #[]) : FileTarget :=
-  let src := cDir / srcPath
-  let rootPath := includeFlag $ pkgDir / cDir / "openssl"
-  let incPath := includeFlag $ pkgDir / cDir / "openssl" / "include"
-  ffiOTarget pkgDir src "cc" [] (opensslDefFlags ++ #[incPath, rootPath] ++ extraOps)
+def opensslFiles : Array FilePath :=
+  let base : FilePath := "openssl"
+  #[ base / "crypto" / "aes" / "aes_core.c" ]
+
+def opensslTarget (srcPath : FilePath) (extraOps : optParam (Array String) #[])
+    : IndexBuildM (BuildJob FilePath) :=
+  let rootPath := includeFlag $ cDir / "openssl"
+  let incPath := includeFlag $ cDir / "openssl" / "include"
+  ffiOTarget srcPath "cc" [] (opensslDefFlags ++ #[incPath, rootPath] ++ extraOps)
 --      -DENGINESDIR="\"/usr/local/lib/engines-1.1\"" -D_REENTRANT -DNDEBUG  -MMD -MF crypto/cryptlib.d.tmp -MT crypto/cryptlib.o -c -o crypto/cryptlib.o crypto/cryptlib.c
 
-
-def opensslTargets (pkgDir : FilePath) : Array FileTarget :=
-  let base : FilePath := "openssl"
-  #[
-     opensslTarget pkgDir $ base / "crypto" / "aes" / "aes_core.c"
-   ]
-
-extern_lib libcrypto :=
-  let libFile := __dir__ / buildDir / libDir / "libcrypto.a"
-  let dependencies := opensslTargets __dir__
-  staticLibTarget libFile dependencies
+extern_lib libcrypto := do
+  let libFile :=  buildLibDir / "libcrypto.a"
+  let dependencies ← opensslFiles.mapM opensslTarget
+  buildStaticLib libFile dependencies
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"7da24c4024a2cb547d9d6e85943027daa77d850f"
+  "https://github.com/leanprover-community/mathlib4"@"cf2e683c25eba2d798b2460d5703a63db72272c0"
 
 require smt from git
-  "https://github.com/Vtec234/lean-smt"@"specialize-def"
-
-package LeanCrypto where
-  -- customize layout
-  srcDir := "lib"
-  libRoots := #[`Crypto]
-  moreLeancArgs := #["-O3"]
-  -- Setting this to `true` produces `libCrypto` which conflicts on case-insensitive filesystems
-  -- with `libcrypto` produced from OpenSSL.
-  precompileModules := false
+  "https://github.com/ufmg-smite/lean-smt"@"main"
 
 lean_lib LeanCrypto where
   roots := #[`Crypto]
@@ -116,18 +110,21 @@ lean_lib LeanCrypto where
 lean_exe mceliece where
   root := `McEliece
 
-script runTest (args) do
-  let some fname := args[0]? | do printUsage; return 1
-  let fname := FilePath.mk fname
-  if fname.extension != some "lean" then printUsage; return 1
+def getTestOutput (fname : FilePath) : ScriptM IO.Process.Output := do
   -- Note: this only works on Unix since it needs the shared library `libSmt`
   -- to also load its transitive dependencies.
   let smtDynlib := (← findModule? `Smt).get!.dynlibFile
-  let out ← IO.Process.output {
+  IO.Process.output {
     cmd := (← getLean).toString
     args := #[s!"--load-dynlib={smtDynlib}", fname.toString],
     env := (← getAugmentedEnv)
   }
+
+script runTest (args) do
+  let some fname := args[0]? | do printUsage; return 1
+  let fname := FilePath.mk fname
+  if fname.extension != some "lean" then printUsage; return 1
+  let out ← getTestOutput fname
   let expected ← IO.FS.readFile (fname.withExtension "expected")
   if ¬out.stderr.isEmpty ∨ out.stdout ≠ expected then
     IO.println s!"Stderr:\n{out.stderr}"
@@ -141,3 +138,17 @@ where printUsage : ScriptM Unit := do
 
 USAGE:
   lake run runTest <file>.lean"
+
+script updateTest (args) do
+  let some fname := args[0]? | do printUsage; return 1
+  let fname := FilePath.mk fname
+  if fname.extension != some "lean" then printUsage; return 1
+  let out ← getTestOutput fname
+  IO.FS.writeFile (fname.withExtension "expected") out.stdout
+  return 0
+
+where printUsage : ScriptM Unit := do
+  IO.println "Run a test file `test.lean` and write the output to `test.expected`.
+
+USAGE:
+  lake run updateTest <file>.lean"

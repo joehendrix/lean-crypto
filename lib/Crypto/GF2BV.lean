@@ -36,9 +36,6 @@ def polyMul (a : BitVec w) (b : BitVec v) : BitVec (w+v) := Id.run do
     opaque ret := if b.lsbGet i then polyAdd tmp a else tmp
   return ret
 
-def reduce (a : BitVec v) (y : BitVec v) : BitVec v :=
-  if a.lsbGet v then polyAdd a y else a
-
 /-- Modulo operation in GF(2)[x] translated from Cryptol reference.
 
 For non-zero b(x), when a(x) = t(x)*b(x) + r(x), mod a b = r.
@@ -104,45 +101,90 @@ end test
 
 end GF2BVPoly
 
-/-! Finite field GF(2^8) -/
+/-- Data of a finite field of the form GF(2^k).
 
-/-- An element of the finite field GF(2^8) -/
-abbrev GF256 := BitVec 8
+Inspired by the [implementation](https://github.com/project-everest/hacl-star/blob/0a58b6343c2dac2cd87a17f1ecb8233c3947f856/specs/Spec.GaloisField.fst)
+in HACL*. -/
+structure GaloisField2k where
+  k : Nat
+  /-- An irreducible polynomial with degree `k`. Representing it explicitly would require `k+1`
+  bits, but we know that the highest one is set, and so need only only store the lower `k` bits.
+  So the "real" polynomial is `x^k + GF2BVPoly.interp irred`. -/
+  irred : BitVec k
 
-namespace GF256
+/-- Select the smallest integer type able to contain elements of GF(2^k),
+or `BitVec` if no integer type can contain them. -/
+-- TODO: Specialize the field operations for these.
+def GaloisField2k.uint : Nat → Type
+  | 0   => UInt8
+  | 9   => UInt16
+  | 17  => UInt32
+  | 33  => UInt64
+  | k+1 =>
+    if k < 64 then uint k
+    else BitVec (k+1)
 
+instance : CoeSort GaloisField2k Type :=
+  ⟨fun F => BitVec F.k⟩
+
+namespace GaloisField2k
 open GF2BVPoly
 
--- x⁸ + x⁴ + x³ + x + 1
-def irreducible : BitVec 9 := BitVec.ofNat 9 0b100011011
+variable {F : GaloisField2k}
 
-def add (a b : GF256) : GF256 := polyAdd a b
+instance : OfNat F (nat_lit 0) := ⟨BitVec.ofNat F.k 0⟩
+instance : OfNat F (nat_lit 1) := ⟨BitVec.ofNat F.k 1⟩
 
-def addMany (as : Array GF256) : GF256 :=
-  as.foldl (init := BitVec.ofNat 8 0) add
+def add (a b : F) : F := polyAdd a b
 
-def mul (a b : GF256) : GF256 := polyMod (polyMul a b) irreducible
+instance : Add F := ⟨add⟩
 
-def pow (k : Nat) (x : GF256) : GF256 :=
-  if hEq : k = 0 then BitVec.ofNat 8 1
+def addMany (as : Array F) : F :=
+  as.foldl (init := BitVec.ofNat F.k 0) add
+
+-- TODO: use specialized polyMod instead
+def irredFull (F : GaloisField2k) :=
+  BitVec.ofNat (F.k+1) (1 <<< F.k) ||| F.irred.zeroExtend (F.k+1) (Nat.le_succ _)
+
+def mul (a b : F) : F := polyMod (polyMul a b) (irredFull F)
+
+instance : Mul F := ⟨mul⟩
+
+def pow (k : Nat) (x : F) : F :=
+  if hEq : k = 0 then 1
   else
     have : k / 2 < k := Nat.div_lt_self (Nat.zero_lt_of_ne_zero hEq) (by decide)
     if k % 2 = 0 then sq (pow (k / 2) x)
     else mul x (sq (pow (k / 2) x))
 where
-  sq (x : GF256) := mul x x
+  sq (x : F) := mul x x
 
--- NOTE(WN): We have to define this because WHNFSmt reduction of `pow` is buggy
--- and introduces WF encoding internals
+instance : Pow F Nat := ⟨fun x k => pow k x⟩
+
+def inv (x : F) : F :=
+  pow (2^F.k - 1) x
+
+end GaloisField2k
+
+open GaloisField2k
+
+def GF256 : GaloisField2k where
+  k := 8
+  -- x⁸ + x⁴ + x³ + x + 1
+  irred := BitVec.ofNat 8 0b11011
+
+-- NOTE(WN): We would like to unroll the loop in `pow` during specialization in order to create
+-- an easier SMT problem, but currently WHNFSmt reduction results in some WF internals. It should
+-- apply unfolding theorems instead. Z3 can deal with this variant even without unrolling.
 /-- `pow2 k = pow (2^k)` -/
-def pow2 (k : Nat) (x : GF256) : GF256 :=
+def GF256.pow2 (k : Nat) (x : GF256) : GF256 :=
   if k = 0 then x
   else
-    let_opaque v := pow2 (k-1) x
+    let_opaque v : GF256 := pow2 (k-1) x
     mul v v
-  
-def inverse (x : GF256) : GF256 :=
-  -- pow2 254 x
+
+def GF256.inv' (x : GF256) : GF256 :=
+  -- pow 254 x
   let v := pow2 7 x
   let v := mul v (pow2 6 x)
   let v := mul v (pow2 5 x)
@@ -151,5 +193,3 @@ def inverse (x : GF256) : GF256 :=
   let v := mul v (pow2 2 x)
   let v := mul v (pow2 1 x)
   v
-
-end GF256

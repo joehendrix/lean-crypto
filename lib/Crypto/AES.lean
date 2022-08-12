@@ -1,8 +1,56 @@
 import Crypto.GF2BV
 
+import Smt.Data.BitVec
 import Smt
 
-/-! SMT theory of arrays -/
+open GF256
+
+/- ! Utilities -/
+
+def Array.transpose [Inhabited α] (as : Array (Array α)) : Array (Array α) := Id.run do
+  let shape := (as.size, as.get! 0 |>.size)
+  let mut ret : Array (Array α) := mkArray shape.snd #[]
+  for j in [:shape.snd] do
+    for i in [:shape.fst] do
+      let a := ret.get! j
+      ret := ret.set! j (a.push (as.get! i |>.get! j))
+  return ret
+
+#eval #[#[1,2,3],#[4,5,6]].transpose.transpose == #[#[1,2,3],#[4,5,6]]
+
+def Array.join (as : Array (Array α)) : Array α := Id.run do
+  let mut ret := #[]
+  for a in as do
+    for x in a do
+      ret := ret.push x
+  return ret
+
+def Array.bvJoin (bs : Array (BitVec w)) (h : bs.size = n) : BitVec (n * w) :=
+  match n with
+  | 0   => 0
+  | n+1 =>
+    let bs' := bs.pop
+    have h' : bs'.size = n := by
+      have := bs.size_pop
+      rw [h, Nat.succ_sub_succ] at this
+      assumption
+    let res := bs'.bvJoin h'
+    have : n < size bs := h ▸ Nat.lt_succ_self n
+    have : (n + 1) * w = n*w + w := by simp [Nat.add_mul]
+    this ▸ res.append bs[n]
+
+def Array.bvSplit (n : Nat) (b : BitVec (n*w)) : Array (BitVec w) :=
+  if h : w = 0 then #[]
+  else Id.run do
+    let mut ret := #[]
+    for i in [:n] do
+      have : i * w + (w - 1) - i*w + 1 = w := by
+        sorry
+      let part : BitVec w := this ▸ b.extract (i*w + (w - 1)) (i*w)
+      ret := ret.push part
+    return ret
+
+/-! Theory of arrays -/
 
 def SmtArray (α β : Type) :=
   α → β
@@ -37,27 +85,38 @@ def translateSmtArray : Translator
       (← applyTranslators! v)
   | _ => return none
 
--- HACK: This is only necessary to avoid specialization
+def SmtArray.ofBvMap (f : BitVec w → BitVec w) : SmtArray (BitVec w) (BitVec w) := Id.run do
+  let mut ret := default
+  for v in List.range (2^w) do
+    let v := BitVec.ofNat w v
+    ret := ret.store v (f v)
+  return ret
+
+/-! AES -/
+
+def keyBlocks := 4
+def inputBlocks := 4 -- 4 for AES128
+def numRounds := max inputBlocks keyBlocks + 6
+def keyBits := keyBlocks * 32
+
+def State := { a : Array (Array GF256) // a.size = 4 ∧ ∀ b, b ∈ a → b.size = inputBlocks }
+def RoundKey := State
+def KeySchedule := RoundKey × { k : Array RoundKey // k.size + 1 = numRounds } × RoundKey
+
+def GF256.dotProduct (a b : Array GF256) : GF256 :=
+  GaloisField2k.addMany (a.zip b |>.map fun (a, b) => a * b)
+
+-- Computable theory of modules over fields would be nicer
+def GF256.vectorMul (v : Array GF256) (M : Array (Array GF256)) : Array GF256 :=
+  M.map fun row => dotProduct v row
+
+def GF256.matrixMul (M N : Array (Array GF256)) : Array (Array GF256) :=
+  M.map fun row => vectorMul row (N.transpose)
+
 def SmtArray.storeBv (a : SmtArray (BitVec 8) (BitVec 8)) (x v : Nat) : SmtArray (BitVec 8) (BitVec 8) :=
   a.store (.ofNat 8 x) (.ofNat 8 v)
 
-/-! We show that the encryption and decryption S-boxes are correctly expressed as lookup tables.
-https://cryptol.net/files/ProgrammingCryptol.pdf ex. 5.10. -/
-
--- The affine transform and its inverse
-def rotateLeft (b : BitVec 8) (n : Nat) : BitVec 8 :=
-  b <<< n ||| b >>> (8 - n)
-
-def rotateRight (b : BitVec 8) (n : Nat) : BitVec 8 :=
-  b >>> n ||| b <<< (8 - n)
-
-def xformByte (b : GF256) : GF256 :=
-  GF256.addMany #[b, rotateRight b 4, rotateRight b 5, rotateRight b 6, rotateRight b 7, BitVec.ofNat 8 0x63]
-
-def xformByte'(b : GF256) : GF256 :=
-  GF256.addMany #[rotateRight b 2, rotateRight b 5, rotateRight b 7, BitVec.ofNat 8 0x05]
-
--- Cursed explicit S-box. We currently cannot partially evaluate it from a higher-level expression
+-- See also tests/aes/SBox.lean
 def sbox : SmtArray (BitVec 8) (BitVec 8) :=
   SmtArray.constant (BitVec.ofNat 8 0) |>.storeBv 0 0x63 |>.storeBv 1 0x7c |>.storeBv 2 0x77 |>.storeBv 3 0x7b
   |>.storeBv 4 0xf2 |>.storeBv 5 0x6b |>.storeBv 6 0x6f |>.storeBv 7 0xc5 |>.storeBv 8 0x30
@@ -157,154 +216,174 @@ def invSbox : SmtArray (BitVec 8) (BitVec 8) :=
   |>.storeBv 244 0xba |>.storeBv 245 0x77 |>.storeBv 246 0xd6 |>.storeBv 247 0x26 |>.storeBv 248 0xe1 |>.storeBv 249 0x69
   |>.storeBv 250 0x14 |>.storeBv 251 0x63 |>.storeBv 252 0x55 |>.storeBv 253 0x21 |>.storeBv 254 0xc |>.storeBv 255 0x7d
 
--- The SubBytes transform and its inverse. One calculates, the other uses the lookup table
+-- The SubBytes transform and its inverse
 def SubByte (b : GF256) : GF256 :=
-  xformByte (GF256.inv' b)
-
-def SubByte' (b : GF256) : GF256 :=
   sbox.select b
 
 def InvSubByte (b : GF256) : GF256 :=
-  GF256.inv' (xformByte' b)
-
-def InvSubByte' (b : GF256) : GF256 :=
   invSbox.select b
 
-@[simp]
-theorem Array.foldl_nil : Array.foldl f init (Array.mkEmpty n) = init :=
-  rfl
+def SubBytes (st : State) : State :=
+  let arr := st.val.map fun row => row.map SubByte
+  ⟨arr, sorry⟩
 
-@[simp]
-theorem Array.foldl_push (xs : Array α) : Array.foldl f init (xs.push x) = Array.foldl f (f init x) xs :=
-  sorry
+def InvSubBytes (st : State) : State :=
+  let arr := st.val.map fun row => row.map InvSubByte
+  ⟨arr, sorry⟩
 
-open GaloisField2k GF2BVPoly
+def rotateArrayLeft {α : Type} (as : Array α) (n : Nat) : Array α :=
+  if h : as.size = 0 then as
+  else Id.run do
+    let mut ret := #[]
+    for i in [:as.size] do
+      have : (i + n) % as.size < as.size :=
+        Nat.mod_lt _ (Nat.zero_lt_of_ne_zero h)
+      ret := ret.push as[(i + n) % as.size]
+    return ret
 
-set_option smt.solver.kind "z3" in
-theorem SubByte_eq_SubByte' (b : GF256) : SubByte b = SubByte' b := by
-  extract_def SubByte'
-    simp only [sbox, SmtArray.storeBv] at SubByte'.def
-    save
+def rotateArrayRight {α : Type} (as : Array α) (n : Nat) : Array α :=
+  if h : as.size = 0 then as
+  else Id.run do
+    let mut ret := #[]
+    for i in [:as.size] do
+      have : (as.size + i - n) % as.size < as.size :=
+        Nat.mod_lt _ (Nat.zero_lt_of_ne_zero h)
+      ret := ret.push as[(as.size + i - n) % as.size]
+    return ret
 
-  extract_def SubByte
-    extract_def xformByte
-      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight]
-        at xformByte.def
-      extract_def add
-        specialize_def GaloisField2k.add [GF256]
-        save
-      conv at xformByte.def =>
-        intro b
-        -- TODO: repeat { rw } doesn't work
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-      save
-    
-    extract_def GF256.inv'
-      extract_def GF256.pow2
-        extract_def mul
-          specialize_def GaloisField2k.mul [GF256] blocking [@polyMod, @polyMul]
-          extract_def polyMod
-            specialize_def GF2BVPoly.polyMod [16, 8]
-            save
+-- The ShiftRows transform and its inverse
+def ShiftRows (st : State) : State := Id.run do
+  let rows := st.val
+  have h : rows.size = 4 := st.property.left
+  -- The GetOp solver should be able to get this automatically
+  have : 0 < rows.size := by simp [h]
+  have : 1 < rows.size := by simp [h]
+  have : 2 < rows.size := by simp [h]
+  have : 3 < rows.size := by simp [h]
+  ⟨#[rows[0], rotateArrayLeft rows[1] 1,
+     rotateArrayLeft rows[2] 2, rotateArrayLeft rows[3] 3],
+  sorry⟩
 
-          extract_def polyMul
-            specialize_def GF2BVPoly.polyMul [8, 8]
-            save
+def InvShiftRows (st : State) : State := Id.run do
+  let rows := st.val
+  have h : rows.size = 4 := st.property.left
+  have : 0 < rows.size := by simp [h]
+  have : 1 < rows.size := by simp [h]
+  have : 2 < rows.size := by simp [h]
+  have : 3 < rows.size := by simp [h]
+  ⟨#[rows[0], rotateArrayRight rows[1] 1,
+     rotateArrayRight rows[2] 2, rotateArrayRight rows[3] 3],
+  sorry⟩
 
-          conv at GaloisField2k.mul.GF256.def =>
-            intro a b
-            rw [ GF2BVPoly.polyMul.«8».«8».specialization,
-              GF2BVPoly.polyMod.«16».«8».specialization ]
-          save
+-- The MixColumns transform and its inverse
+def MixColumns (st : State) : State :=
+  ⟨GF256.matrixMul m st.val, sorry⟩
+where m :=
+  #[#[2, 3, 1, 1],
+    #[1, 2, 3, 1],
+    #[1, 1, 2, 3],
+    #[3, 1, 1, 2]] |>.map fun row => row.map (BitVec.ofNat 8)
 
-        conv at GF256.pow2.def =>
-          intro k x
-          rw [ GaloisField2k.mul.GF256.specialization ]
-        save
-      
-      conv at GF256.inv'.def =>
-        intro x
-        -- TODO: rw doesn't go under lets but simp hammer isn't ideal
-        simp (config := {zeta := false}) only
-          [ GaloisField2k.mul.GF256.specialization ]
-      save
+def InvMixColumns (st : State) : State :=
+ ⟨GF256.matrixMul m st.val, sorry⟩
+where m :=
+  #[#[0x0e, 0x0b, 0x0d, 0x09],
+    #[0x09, 0x0e, 0x0b, 0x0d],
+    #[0x0d, 0x09, 0x0e, 0x0b],
+    #[0x0b, 0x0d, 0x09, 0x0e]] |>.map fun row => row.map (BitVec.ofNat 8)
 
-  smt_show [
-    SubByte,
-    SubByte',
-    xformByte,
-    GaloisField2k.add.GF256,
-    GF256.inv',
-    GF256.pow2,
-    GaloisField2k.mul.GF256,
-    GF2BVPoly.polyMul.«8».«8»,
-    GF2BVPoly.polyMod.«16».«8»
-  ] 
+-- The AddRoundKey transform
+def AddRoundKey (rk : RoundKey) (st : State) : State :=
+  -- Cpmponentwise sum
+  ⟨rk.val.zipWith st.val fun rowRk rowSt => rowRk.zipWith rowSt (· ^^^ ·), sorry⟩
 
-theorem InvSubByte_eq_InvSubByte' (b : GF256) : InvSubByte b = InvSubByte' b := by
-  extract_def InvSubByte'
-    simp only [invSbox, SmtArray.storeBv] at InvSubByte'.def
-    save
+-- Converting a 128 bit message to a State and back
+def msgToState (msg : BitVec 128) : State :=
+  let rows := Array.bvSplit 4 (w := 32) msg
+  let st := rows.map (Array.bvSplit 4 (w := 8))
+  ⟨Array.transpose st, sorry⟩
 
-  extract_def InvSubByte
-    extract_def xformByte'
-      simp only [addMany, List.toArray, List.toArrayAux, Array.foldl_push, Array.foldl_nil, rotateRight]
-        at xformByte'.def
-      extract_def add
-        specialize_def GaloisField2k.add [GF256]
-        save
-      conv at xformByte'.def =>
-        intro b
-        -- TODO: repeat { rw } doesn't work
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-        rw [GaloisField2k.add.GF256.specialization]
-      save
-    
-    extract_def GF256.inv'
-      extract_def GF256.pow2
-        extract_def mul
-          specialize_def GaloisField2k.mul [GF256] blocking [@polyMod, @polyMul]
-          extract_def polyMod
-            specialize_def GF2BVPoly.polyMod [16, 8]
-            save
+def State.toMsg (st : State) : BitVec 128 :=
+  let v := st.val.transpose.join
+  have : v.size = 4 * inputBlocks := sorry
+  st.val.transpose.join.bvJoin this
 
-          extract_def polyMul
-            specialize_def GF2BVPoly.polyMul [8, 8]
-            save
+#exit
 
-          conv at GaloisField2k.mul.GF256.def =>
-            intro a b
-            rw [ GF2BVPoly.polyMul.«8».«8».specialization,
-              GF2BVPoly.polyMod.«16».«8».specialization ]
-          save
+SubWord : [4]GF28 -> [4]GF28
+SubWord bs = [ SubByte' b | b <- bs ]
 
-        conv at GF256.pow2.def =>
-          intro k x
-          rw [ GaloisField2k.mul.GF256.specialization ]
-        save
-      
-      conv at GF256.inv'.def =>
-        intro x
-        -- TODO: rw doesn't go under lets but simp hammer isn't ideal
-        simp (config := {zeta := false}) only
-          [ GaloisField2k.mul.GF256.specialization ]
-      save
+RotWord : [4]GF28 -> [4]GF28
+RotWord [a0, a1, a2, a3] = [a1, a2, a3, a0]
 
-  smt_show [
-    InvSubByte,
-    InvSubByte',
-    xformByte',
-    GaloisField2k.add.GF256,
-    GF256.inv',
-    GF256.pow2,
-    GaloisField2k.mul.GF256,
-    GF2BVPoly.polyMul.«8».«8»,
-    GF2BVPoly.polyMod.«16».«8»
-  ] 
+NextWord : ([8],[4][8],[4][8]) -> [4][8]
+NextWord(i, prev, old) = old ^ mask
+   where mask = if i % `Nk == 0
+                then SubWord(RotWord(prev)) ^ Rcon (i / `Nk)
+                else if (`Nk > 6) && (i % `Nk == 4)
+                     then SubWord(prev)
+                     else prev
+
+
+ExpandKeyForever : [Nk][4][8] -> [inf]RoundKey
+ExpandKeyForever seed = [ transpose g | g <- groupBy`{4} (keyWS seed) ]
+
+keyWS : [Nk][4][8] -> [inf][4][8]
+keyWS seed    = xs
+     where xs = seed # [ NextWord(i, prev, old)
+                       | i    <- [ `Nk ... ]
+                       | prev <- drop`{Nk-1} xs
+                       | old  <- xs
+                       ]
+
+ExpandKey : [AESKeySize] -> KeySchedule
+ExpandKey key = (keys @ 0, keys @@ [1 .. (Nr - 1)], keys @ `Nr)
+  where   seed : [Nk][4][8]
+          seed = split (split key)
+          keys = ExpandKeyForever seed
+
+fromKS : KeySchedule -> [Nr+1][4][32]
+fromKS (f, ms, l) = [ formKeyWords (transpose k) | k <- [f] # ms # [l] ]
+    where formKeyWords bbs = [ join bs | bs <- bbs ]
+
+// AES rounds and inverses
+AESRound : (RoundKey, State) -> State
+AESRound (rk, s) = AddRoundKey (rk, MixColumns (ShiftRows (SubBytes s)))
+
+AESFinalRound : (RoundKey, State) -> State
+AESFinalRound (rk, s) = AddRoundKey (rk, ShiftRows (SubBytes s))
+
+AESInvRound : (RoundKey, State) -> State
+AESInvRound (rk, s) =
+      InvMixColumns (AddRoundKey (rk, InvSubBytes (InvShiftRows s)))
+AESFinalInvRound : (RoundKey, State) -> State
+AESFinalInvRound (rk, s) = AddRoundKey (rk, InvSubBytes (InvShiftRows s))
+
+// AES Encryption
+aesEncrypt : ([128], [AESKeySize]) -> [128]
+aesEncrypt (pt, key) = stateToMsg (AESFinalRound (kFinal, rounds ! 0))
+  where   (kInit, ks, kFinal) = ExpandKey key
+          state0 = AddRoundKey(kInit, msgToState pt)
+          rounds = [state0] # [ AESRound (rk, s) | rk <- ks
+                                                 | s <- rounds
+                              ]
+
+// AES Decryption
+aesDecrypt : ([128], [AESKeySize]) -> [128]
+aesDecrypt (ct, key) = stateToMsg (AESFinalInvRound (kFinal, rounds ! 0))
+  where   (kFinal, ks, kInit) = ExpandKey key
+          state0 = AddRoundKey(kInit, msgToState ct)
+          rounds = [state0] # [ AESInvRound (rk, s)
+                              | rk <- reverse ks
+                              | s  <- rounds
+                              ]
+
+// Test runs:
+
+// cryptol> aesEncrypt (0x3243f6a8885a308d313198a2e0370734,   \
+//                      0x2b7e151628aed2a6abf7158809cf4f3c)
+// 0x3925841d02dc09fbdc118597196a0b32
+// cryptol> aesEncrypt (0x00112233445566778899aabbccddeeff,   \
+//                      0x000102030405060708090a0b0c0d0e0f)
+// 0x69c4e0d86a7b0430d8cdb78070b4c55a
+property AESCorrect msg key = aesDecrypt (aesEncrypt (msg, key), key) == msg
