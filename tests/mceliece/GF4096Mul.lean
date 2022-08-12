@@ -114,6 +114,8 @@ example (x y : GF) : GF4096.ofGF (x * y) = (GF4096.ofGF x) * (GF4096.ofGF y) := 
     gfMask
   ]
 
+  sorry
+
 #exit -- times out below
     
   extract_def polyMod
