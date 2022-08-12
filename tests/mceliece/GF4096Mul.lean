@@ -39,7 +39,7 @@ def translateUInt : Translator
     let n ← reduceLit n e
     return Smt.BitVec.mkLit 16 n
   | .const ``UInt16.add _        => return symbolT "bvadd"
-  | .const ``UInt16.sub _        => throwError "unknown"
+  | .const ``UInt16.sub _        => return symbolT "bvsub" -- QF_BV
   | .const ``UInt16.mul _        => return symbolT "bvmul"
   | .const ``UInt16.div _        => return symbolT "bvudiv"
   | .const ``UInt16.mod _        => return symbolT "bvurem"
@@ -59,7 +59,7 @@ def translateUInt : Translator
     let n ← reduceLit n e
     return BitVec.mkLit 32 n
   | .const ``UInt32.add _        => return symbolT "bvadd"
-  | .const ``UInt32.sub _        => throwError "unknown"
+  | .const ``UInt32.sub _        => return symbolT "bvsub" -- QF_BV!
   | .const ``UInt32.mul _        => return symbolT "bvmul"
   | .const ``UInt32.div _        => return symbolT "bvudiv"
   | .const ``UInt32.mod _        => return symbolT "bvurem"
@@ -114,8 +114,6 @@ example (x y : GF) : GF4096.ofGF (x * y) = (GF4096.ofGF x) * (GF4096.ofGF y) := 
     gfMask
   ]
 
-  sorry
-  
 #exit -- times out below
     
   extract_def polyMod
@@ -125,7 +123,7 @@ example (x y : GF) : GF4096.ofGF (x * y) = (GF4096.ofGF x) * (GF4096.ofGF y) := 
   extract_def polyMul
   specialize_def GF2BVPoly.polyMul [12, 12]
   save
-
+#exit
   conv at GaloisField2k.mul.GF4096.def =>
     intro a b
     rw [ GF2BVPoly.polyMul.«12».«12».specialization,
