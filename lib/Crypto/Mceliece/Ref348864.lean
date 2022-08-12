@@ -198,8 +198,52 @@ def store_gf (irr : Vector sys_t GF) : ByteVec (2*sys_t) :=
 
 def secretKeyBytes : Nat := 40 + 2*sys_t + cond_bytes + N/8
 
-@[extern "lean_controlbitsfrompermutation2"]
-opaque controlBitsFromPermutation2 (pi : @&Vector (1 <<< gfbits) GF) : ByteVec cond_bytes
+@[reducible]
+def row_size := 1 <<< (gfbits - 1)
+
+@[reducible]
+def cb_size : Nat := row_size*(2*gfbits - 1)
+
+@[extern "lean_cbf"]
+opaque cbf (off:@&Nat) (w:@&Nat) (pi : @&Vector (1 <<< (w+1)) GF)
+  : Vector (1 <<< w) Bool
+
+def controlBitsFromPermutation4 (a : Vector cb_size Bool) (off:Nat) : ∀(w:Nat) (_pi : Vector (1 <<< (w+1)) GF), Vector cb_size Bool
+| 0, pi =>
+  a.set! (row_size * (gfbits-1) + off) (decide ((pi.get! 0).val &&& 1 = 1))
+| Nat.succ w, pi => Id.run do
+  let n := 1 <<< (w+1)
+
+  let bits := cbf off (Nat.succ w) pi
+
+  let c : Vector _ GF := Vector.generate (1 <<< (w+2)) (λk =>
+    let idx := pi.get! k
+    if bits.get! (idx.val.toNat / 2) then ⟨idx.val ^^^ 1, sorry⟩  else idx)
+  let wk := gfbits - (w+2)
+  let step := 1 <<< wk
+
+  let mut a := a
+
+  for j in range 0 n do
+    let idx := step * j + off
+    let p := bits.get! j
+    a := a.set! (row_size * (gfbits - (w+2)) + idx) p
+
+  for j in range 0 n do
+    let idx := step * j + off
+    let p :=  decide ((c.get! (2*j)).val &&& 1 = 1)
+    a := a.set! (row_size * (gfbits + w) + idx) p
+
+  let q0 : Vector n GF := Vector.generate n λj =>
+    let idx : Nat := 2*j.val+ ((c.get! (2*j.val)).val &&& 1).toNat
+    ⟨(c.get! idx).val >>> 1, sorry⟩
+  let q1 : Vector n GF := Vector.generate n λj =>
+    let idx : Nat := 2*j.val+ (1-((c.get! (2*j.val)).val &&& 1).toNat)
+    ⟨(c.get! idx).val >>> 1, sorry⟩
+
+  a := controlBitsFromPermutation4 a off w q0
+  let step := 1 <<< (gfbits - (w+2))
+  controlBitsFromPermutation4 a (off+step) w q1
 
 theorem shl_plus_shl (n : Nat) : (1 <<< n + 1 <<< n) = 1 <<< (n+1) := sorry
 
@@ -243,7 +287,11 @@ def testPerm (out : ByteVec cond_bytes) :  Vector (1 <<< gfbits) GF := Id.run do
   pure pi
 
 def controlBitsFromPermutation (pi : Vector (1 <<< gfbits) GF) : Option (ByteVec cond_bytes) :=
-  let out := controlBitsFromPermutation2 pi
+  let out := controlBitsFromPermutation4 (Vector.replicate cb_size false) 0 (gfbits-1) pi
+  let out :=
+        ByteVec.generate cond_bytes λi =>
+          let v := BitVec.generate_lsb 8 (λj => out.get! (8*i + j))
+          v.toUInt8
   if pi ≠ testPerm out then
     none
   else

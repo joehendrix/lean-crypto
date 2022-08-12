@@ -102,22 +102,112 @@ extern "C" lean_obj_res lean_shake256(b_lean_obj_arg size_obj, b_lean_obj_arg in
     return r_obj;
 }
 
+/* parameters: 1 <= w <= 10; n = 2^w */
+/* input: permutation pi of {0,1,...,n-1} */
+/* output: (2m-1)n/2 control bits at positions pos,pos+step,... */
+/* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
+/* caller must 0-initialize positions first */
+/* temp must have space for int32[2*n] */
+static void cbf_le(bool* bit, const int16_t *pi, const int16_t* pi_inv, const int16_t* E, const int16_t* E_min, int w) {
+    const int n = 1 << w;
+    assert(w <= 10);
+
+
+    int16_t B00[n];
+    int16_t B10[n];
+    for (int x = 0; x < n; ++x) {
+        B00[x] = E_min[x];
+        B10[x] = E[E[x]];
+    }
+
+    for (int i = 1; i < w-1; ++i) {
+        /* B = (p<<10)+c */
+
+        int16_t B00_copy[n];
+        for (int x = 0;x < n;++x)
+            B00_copy[x] = B00[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
+        for (int x = 0; x < n; ++x) {
+            if (B00_copy[B10[x]] < B00_copy[x]) {
+                B00[x] = B00_copy[B10[x]];
+            } else {
+                B00[x] = B00_copy[x];
+            }
+        }
+
+        int16_t B10_copy[n];
+        for (int x = 0;x < n;++x)
+            B10_copy[x] = B10[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
+        for (int x = 0; x < n; ++x)
+            B10[x] = B10_copy[B10_copy[x]];
+    }
+    for (int x = 0; x < n/2; ++x)
+        bit[x] = B00[2*x] & 1;
+}
+
 /* parameters: 1 <= w <= 14; n = 2^w */
 /* input: permutation pi of {0,1,...,n-1} */
 /* output: (2m-1)n/2 control bits at positions pos,pos+step,... */
 /* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
 /* caller must 0-initialize positions first */
 /* temp must have space for int32[2*n] */
-static void cbf(bool* bit, bool* put2, int16_t* q, const int16_t *pi, int w) {
+static void cbf_gt(bool* bit, const int16_t *pi, const int16_t* pi_inv, const int16_t* E, const int16_t* E_min, int w) {
     const int n = 1 << w;
-    const int step = 1 << (GFBITS - w);
+    assert(w > 10);
 
-    for (int x = 0; x < n; ++x) {
-        assert(0 <= pi[x] && pi[x] < n);
+    int16_t B00[n];
+    int16_t B16[n];
+
+    for (int x = 0;x < n;++x) {
+        B00[x] = E_min[x];
+        B16[x] = E[E[x]];
     }
 
-    int16_t pi_inv[n];
-    memset(pi_inv, -1, sizeof(int16_t) * n);
+    for (int i = 1;i < w-1;++i) {
+        /* B = (p<<16)+c */
+
+        int32_t A[n];
+        for (int x = 0;x < n;++x)
+            A[x] = B00[B16[x]];
+        /* A = p^(-1)<<16+c */
+
+        if (i < w-2) {
+            int32_t H[n];
+            for (int x = 0;x < n;++x)
+                H[x] = B16[B16[x]];
+            for (int x = 0; x < n; ++x)
+                B16[x] = H[x];
+            /* B = (p^(-2)<<16)+c */
+        }
+
+        /* A = id<<16+cp */
+        for (long long x = 0;x < n;++x) {
+            if (A[x] < B00[x]) {
+                B00[x] = A[x];
+            }
+        }
+    }
+
+    for (int x = 0; x < n/2; ++x)
+        bit[x] = B00[2*x] & 0x1;
+}
+
+extern "C"
+lean_obj_res
+lean_cbf(b_lean_obj_arg off_obj, b_lean_obj_arg w_obj, b_lean_obj_arg pi_obj) {
+    const int row_size = 1 << (GFBITS - 1);
+    const size_t cnt = row_size * (2*GFBITS-1);
+    assert(lean_is_scalar(off_obj));
+    size_t off = lean_unbox(off_obj);
+    size_t w = lean_unbox(w_obj) + 1;
+    assert(w > 1);
+    const int n = 1 << w;
+    const size_t perm_count = n;
+    assert(lean_array_size(pi_obj) == perm_count);
+    gf pi[perm_count];
+    init_gf_array(pi, pi_obj);
+
+    uint16_t pi_inv[n];
+    memset(pi_inv, -1, sizeof(uint16_t) * n);
     for (int x = 0; x < n; ++x)
         pi_inv[pi[x]] = x;
     for (int16_t x = 0; x < n; ++x) {
@@ -133,287 +223,18 @@ static void cbf(bool* bit, bool* put2, int16_t* q, const int16_t *pi, int w) {
     for (int x = 0; x < n; ++x) {
         E_min[x] = (x < E[x]) ? x : E[x];
     }
-    /* B = (p<<16)+c */
 
+    bool bit[1 << lean_unbox(w_obj)];
     if (w <= 10) {
-        int16_t B00[n];
-        int16_t B10[n];
-        for (int x = 0; x < n; ++x) {
-            B00[x] = E_min[x];
-            B10[x] = E[E[x]];
-        }
-
-        for (int i = 1; i < w-1; ++i) {
-            /* B = (p<<10)+c */
-
-            int16_t B00_copy[n];
-            for (int x = 0;x < n;++x)
-                B00_copy[x] = B00[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
-            for (int x = 0; x < n; ++x) {
-                if (B00_copy[B10[x]] < B00_copy[x]) {
-                    B00[x] = B00_copy[B10[x]];
-                } else {
-                    B00[x] = B00_copy[x];
-                }
-            }
-
-            int16_t B10_copy[n];
-            for (int x = 0;x < n;++x)
-                B10_copy[x] = B10[x]; /* A = (p^{-1}<<20)+(p<<10)+c */
-            for (int x = 0; x < n; ++x)
-                B10[x] = B10_copy[B10_copy[x]];
-        }
-        for (int x = 0; x < n/2; ++x)
-            bit[x] = B00[2*x] & 1;
+        cbf_le(bit, (int16_t*) pi, (int16_t*) pi_inv, E, E_min, w);
     } else {
-        int16_t B00[n];
-        int16_t B16[n];
-
-        for (int x = 0;x < n;++x) {
-            B00[x] = E_min[x];
-            B16[x] = E[E[x]];
-        }
-
-        for (int i = 1;i < w-1;++i) {
-            /* B = (p<<16)+c */
-
-            int32_t A[n];
-            for (int x = 0;x < n;++x)
-                A[x] = B00[B16[x]];
-            /* A = p^(-1)<<16+c */
-
-            if (i < w-2) {
-                int32_t H[n];
-                for (int x = 0;x < n;++x)
-                    H[x] = B16[B16[x]];
-                for (int x = 0; x < n; ++x)
-                    B16[x] = H[x];
-                /* B = (p^(-2)<<16)+c */
-            }
-
-            /* A = id<<16+cp */
-            for (long long x = 0;x < n;++x) {
-                if (A[x] < B00[x]) {
-                    B00[x] = A[x];
-                }
-            }
-        }
-
-        for (int x = 0; x < n/2; ++x)
-            bit[x] = B00[2*x] & 0x1;
+        cbf_gt(bit, (int16_t*) pi, (int16_t*) pi_inv, E, E_min, w);
     }
 
-    int16_t C[n];
-    for (int k = 0; k < n; ++k) {
-        C[k] = bit[pi[k]/2] ? pi[k]^1 : pi[k];
-    }
-
-    for (int k = 0; k < n/2; ++k) {
-        put2[k] = (C[2*k]&1) == 1; /* l[k] */
-    }
-
+    lean_obj_res bit_obj = lean_alloc_array(n/2, n/2);
+    lean_object** out = lean_array_cptr(bit_obj);
     for (int j = 0; j < n/2; ++j) {
-        q[j]     = C[2*j + (C[2*j]&1 ? 1 : 0)] >> 1;
+        out[j] = lean_box(bit[j] ? 1 : 0);
     }
-    for (int j = 0; j < n/2; ++j) {
-        q[j+n/2] = C[2*j + (C[2*j]&1 ? 0 : 1)] >> 1;
-    }
+    return bit_obj;
 }
-
-static
-void lean_set_array_bool(lean_object** o, size_t idx, bool b) {
-    o[idx] = lean_box(b ? 1 : 0);
-}
-
-/* parameters: 1 <= w <= 14; n = 2^w */
-/* input: permutation pi of {0,1,...,n-1} */
-/* output: (2m-1)n/2 control bits at positions pos,pos+step,... */
-/* output position pos is by definition 1&(out[pos/8]>>(pos&7)) */
-/* caller must 0-initialize positions first */
-/* temp must have space for int32[2*n] */
-static void cbrecursion(bool** out_low, bool** out_high, lean_object** out, int off, const int16_t *pi, int w) {
-    const int row_size = 1 << (GFBITS - 1);
-
-    assert(w >= 1);
-    if (w == 1) {
-        assert((pi[0] & ~1) == 0);
-        assert(!out_low[GFBITS - 1][off]);
-        out_low[GFBITS - 1][off] = (pi[0] & 1);
-        lean_set_array_bool(out, row_size * (GFBITS - 1) + off, pi[0] & 1);
-        return;
-    }
-
-    const int n = 1 << w;
-    const int wk = GFBITS - w;
-
-    const int step = 1 << wk;
-    assert(step <= (1 << (GFBITS - 2)));
-
-    // B refers to the second n elements in temp.
-    int16_t q[n];
-
-    bool bit[n/2];
-    bool put2[n/2];
-    cbf(bit, put2, q, pi, w);
-
-    cbrecursion(out_low, out_high, out, off,     q,      w-1);
-    cbrecursion(out_low, out_high, out, off+step, q+n/2, w-1);
-
-    for (int j = 0; j < n/2; ++j) {
-        int32_t fj = bit[j] ? 1 : 0;
-        int pos2 = step * j + off;
-        bool* outr = out_low[GFBITS-w];
-        assert(!outr[pos2]);
-        outr[pos2] = bit[j];
-        lean_set_array_bool(out, row_size * (GFBITS - w) + pos2, bit[j]);
-    }
-    for (int j = 0; j < n/2; ++j) {
-        bool* outr = out_high[w-2];
-        int pos2 = step * j + off;
-        assert(!outr[pos2]);
-        outr[pos2] = put2[j];
-        lean_set_array_bool(out, row_size * (GFBITS + (w-2)) + pos2, put2[j]);
-    }
-}
-
-inline static lean_obj_res lean_mk_pair(b_lean_obj_arg x, b_lean_obj_arg y) {
-    lean_object * r = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(r, 0, x);
-    lean_ctor_set(r, 0, y);
-    return r;
-}
-
-extern "C" lean_obj_res lean_controlbitsfrompermutation2(b_lean_obj_arg pi_obj) {
-    const size_t perm_count = 1 << GFBITS;
-    assert(lean_array_size(pi_obj) == perm_count);
-    gf pi[perm_count];
-    init_gf_array(pi, pi_obj);
-
-
-    const size_t cnt = (1 << (GFBITS - 1)) * (2*GFBITS-1);
-
-    bool out2[cnt];
-    memset(out2, 0, sizeof(out2));
-
-
-    bool* out_low[GFBITS];
-    for (int i = 0; i != GFBITS; ++i) {
-        out_low[i] = out2 + (1 << (GFBITS - 1)) * i;
-    }
-
-    bool* out_high[GFBITS-1];
-    for (int i = 0; i != GFBITS-1; ++i) {
-        out_high[i] = out2 + (1 << (GFBITS - 1)) * (GFBITS + i);
-    }
-
-
-    lean_object* arr_obj = lean_alloc_array(cnt, cnt);
-
-//    lean_object * r   = lean_ensure_exclusive_array(a);
-//    lean_object ** it =  + i;
-
-    cbrecursion(out_low, out_high, lean_array_cptr(arr_obj), 0, (int16_t*)pi, GFBITS);
-
-    const size_t cond_bytes = cnt >> 3;
-    lean_obj_res out_obj = lean_alloc_sarray1(1, cond_bytes);
-    uint8_t* out = lean_sarray_cptr(out_obj);
-    for (int i = 0; i != cnt >> 3; ++i) {
-        uint8_t r = 0;
-        for (int j = 0; j != 8; ++j) {
-            r |= out2[8*i+j] ? (1 << j) : 0;
-        }
-        out[i] = r;
-    }
-    lean_free_object(arr_obj);
-
-    return out_obj;
-}
-
-/*
-extern "C" LEAN_EXPORT void lean_extract_mpz_value(lean_object * o, mpz_t v);
-
-static void nat_export_to_bytes_msb(size_t n, unsigned char* a, b_lean_obj_arg x) {
-    if (n == 0)
-        return;
-    mpz_t xz;
-    if (lean_is_scalar(x)) {
-        mpz_init_set_ui(xz, lean_unbox(x));
-    } else {
-        mpz_init(xz);
-        lean_extract_mpz_value(x, xz);
-    }
-
-    size_t count;
-    mpz_export(a, &count, 1, 1, -1, 0, xz);
-    assert(count <= n);
-    if (count < n) {
-        memmove(a + (n-count), a, count);
-        memset(a, 0, n-count);
-    }
-    // Set remaining bits
-    mpz_clear(xz);
-}
-
-extern "C" lean_obj_res lean_controlbitsfrompermutation3(lean_obj_arg in_obj, b_lean_obj_arg pi_obj) {
-    const size_t perm_count = 1 << GFBITS;
-    assert(lean_array_size(pi_obj) == perm_count);
-    gf pi[perm_count];
-    init_gf_array(pi, pi_obj);
-
-    assert(lean_array_size(in_obj) == (2*GFBITS-1));
-
-
-    const size_t byte_count = 1 << (GFBITS - 4);
-    const size_t bit_count  = 1 << (GFBITS - 1);
-
-    const size_t cnt = bit_count * (2*GFBITS-1);
-
-    bool scratch[cnt];
-    bool* scratcha[2*GFBITS-1];
-    for (int i = 0; i != 2*GFBITS-1; ++i) {
-        scratcha[i] = scratch + bit_count * i;
-        bool* outb = scratcha[i];
-
-        uint8_t temp[byte_count];
-
-        nat_export_to_bytes_msb(byte_count, temp, lean_array_get_core(in_obj, i));
-        for (int j = 0; j != byte_count; ++j) {
-            uint8_t t = temp[j];
-            for (int k = 0; k != 8; ++k) {
-                outb[8*j + k] = (t >> (7-k)) & 1;
-            }
-        }
-    }
-
-    cbrecursion(scratcha, scratcha + GFBITS, 0, (int16_t*)pi, GFBITS);
-
-    lean_object* out_obj;
-    lean_object **out_array;
-
-    if (lean_is_exclusive(in_obj)) {
-        out_obj = in_obj;
-        out_array = lean_array_cptr(out_obj);
-        for (int i = 0; i != 2*GFBITS-1; ++i) {
-            lean_dec_ref(out_array[i]);
-        }
-    } else {
-        lean_dec_ref(in_obj);
-        out_obj = lean_alloc_array(2*GFBITS-1, 2*GFBITS-1);
-        out_array = lean_array_cptr(out_obj);
-    }
-
-
-    const size_t cond_bytes = cnt >> 3;
-    lean_obj_res out_obj = lean_alloc_sarray1(1, cond_bytes);
-    uint8_t* out = lean_sarray_cptr(out_obj);
-    for (int i = 0; i != cond_bytes; ++i) {
-        uint8_t r = 0;
-        for (int j = 0; j != 8; ++j) {
-            r |= scratch[8*i+j] ? (1 << j) : 0;
-        }
-        out[i] = r;
-    }
-
-    return out_obj;
-}
-*/
