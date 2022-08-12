@@ -204,40 +204,82 @@ def row_size := 1 <<< (gfbits - 1)
 @[reducible]
 def cb_size : Nat := row_size*(2*gfbits - 1)
 
-@[extern "lean_cbf"]
-opaque cbf (off:@&Nat) (w:@&Nat) (pi : @&Vector (1 <<< (w+1)) GF)
-  : Vector (1 <<< w) Bool
+def cbf_le (w:@&Nat)
+      (e : @&Vector (1 <<< (w+1)) GF)
+      (e_min : @&Vector (1 <<< (w+1)) GF)
+  : Vector (1 <<< w) Bool := Id.run do
+  let n := 1 <<< (w+1)
+
+  let mut b00 := e_min.map λv => v.val.toNat
+  let mut b10 := Vector.generate n λx => (e.get! (e.get! x).val.toNat).val.toNat
+  for _i in range 1 (w-1) do
+    b00 := Vector.generate n λx =>
+      if b00.get! (b10.get! x) < b00.get! x then
+        b00.get! (b10.get! x)
+      else
+        b00.get! x
+    b10 := Vector.generate n λx => b10.get! (b10.get! x)
+  pure <| Vector.generate (1 <<< w) λx => decide ((b00.get! (2*x)) &&& 1 = 1)
+
+def cbf_gt (w:@&Nat)
+      (e : @&Vector (1 <<< (w+1)) GF)
+      (e_min : @&Vector (1 <<< (w+1)) GF)
+  : Vector (1 <<< w) Bool := Id.run do
+  let n := 1 <<< (w+1)
+
+  let mut b00 := e_min.map λv => v.val.toNat
+  let mut b16 := Vector.generate n λx => (e.get! (e.get! x).val.toNat).val.toNat
+
+  for i in range 1 (w-1) do
+    let a := Vector.generate n λx => b00.get! (b16.get! x)
+    if i < w-1 then
+      b16 := Vector.generate n λx => b16.get! (b16.get! x)
+    b00 := Vector.generate n λx => min (b00.get! x) (a.get! x)
+
+  pure <| Vector.generate (1 <<< w) λx => decide ((b00.get! (2*x)) &&& 1 = 1)
 
 def controlBitsFromPermutation4 (a : Vector cb_size Bool) (off:Nat) : ∀(w:Nat) (_pi : Vector (1 <<< (w+1)) GF), Vector cb_size Bool
 | 0, pi =>
   a.set! (row_size * (gfbits-1) + off) (decide ((pi.get! 0).val &&& 1 = 1))
 | Nat.succ w, pi => Id.run do
-  let n := 1 <<< (w+1)
+  let n := 1 <<< (w+2)
 
-  let bits := cbf off (Nat.succ w) pi
+  let mut pi_inv : Vector n GF := Vector.replicate n ⟨0, sorry⟩
+  for i in range 0 n do
+    pi_inv := pi_inv.set! (pi.get! i).val.toNat ⟨UInt16.ofNat i, sorry⟩
 
-  let c : Vector _ GF := Vector.generate (1 <<< (w+2)) (λk =>
+  let e                   := Vector.generate n λx => pi.get! ((pi_inv.get! (x ^^^ 1)).val.toNat ^^^ 1)
+  let e_min : Vector n GF := Vector.generate n λx => ⟨min (UInt16.ofNat x) (e.get! x).val, sorry⟩
+
+  let bits :=
+    if w+2 ≤ 10 then
+      cbf_le (w+1) e e_min
+    else
+      cbf_gt (w+1) e e_min
+
+  let c : Vector _ GF := Vector.generate n (λk =>
     let idx := pi.get! k
     if bits.get! (idx.val.toNat / 2) then ⟨idx.val ^^^ 1, sorry⟩  else idx)
   let wk := gfbits - (w+2)
   let step := 1 <<< wk
 
   let mut a := a
+  let m := 1 <<< (w+1)
 
-  for j in range 0 n do
+  for j in range 0 m do
     let idx := step * j + off
     let p := bits.get! j
     a := a.set! (row_size * (gfbits - (w+2)) + idx) p
 
-  for j in range 0 n do
+  for j in range 0 m do
     let idx := step * j + off
     let p :=  decide ((c.get! (2*j)).val &&& 1 = 1)
     a := a.set! (row_size * (gfbits + w) + idx) p
 
-  let q0 : Vector n GF := Vector.generate n λj =>
+  let q0 : Vector m GF := Vector.generate m λj =>
     let idx : Nat := 2*j.val+ ((c.get! (2*j.val)).val &&& 1).toNat
     ⟨(c.get! idx).val >>> 1, sorry⟩
-  let q1 : Vector n GF := Vector.generate n λj =>
+  let q1 : Vector m GF := Vector.generate m λj =>
     let idx : Nat := 2*j.val+ (1-((c.get! (2*j.val)).val &&& 1).toNat)
     ⟨(c.get! idx).val >>> 1, sorry⟩
 
