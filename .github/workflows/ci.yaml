@@ -55,5 +55,9 @@ jobs:
       with:
         path: lean_packages
         key: ${{ matrix.name }}-lean_packages
+    - name: Run AES test
+      run: |
+        lake build aes_test
+        ./build/bin/aes_test ./tests/aes/aes.test
     - name: Run tests
       run: ./scripts/test.sh

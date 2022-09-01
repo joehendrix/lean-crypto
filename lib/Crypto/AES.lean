@@ -1,3 +1,6 @@
+/-
+This is some experimental code to validate building AES.
+-/
 import Crypto.GF2BV
 
 import Smt.Data.BitVec
@@ -16,7 +19,7 @@ def Array.transpose [Inhabited α] (as : Array (Array α)) : Array (Array α) :=
       ret := ret.set! j (a.push (as.get! i |>.get! j))
   return ret
 
-#eval #[#[1,2,3],#[4,5,6]].transpose.transpose == #[#[1,2,3],#[4,5,6]]
+#eval #[#[1,2,3],#[4,5,6]].transpose == #[#[1,4],#[2,5], #[3,6]]
 
 def Array.join (as : Array (Array α)) : Array α := Id.run do
   let mut ret := #[]

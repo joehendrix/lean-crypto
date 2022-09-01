@@ -34,8 +34,7 @@ target bindingsTarget : FilePath := do
       includeFlag (cDir / "mceliece348864"),
       includeFlag (← getLeanIncludeDir)]
 
-def mcelieceFiles : Array FilePath :=
-  #[ "gf.c", "util.c" ]
+def mcelieceFiles : Array FilePath := #[ ]
 
 def mcelieceTarget (srcPath : FilePath) : IndexBuildM (BuildJob FilePath) :=
   let src := "mceliece348864" / srcPath
@@ -44,7 +43,6 @@ def mcelieceTarget (srcPath : FilePath) : IndexBuildM (BuildJob FilePath) :=
        "-DKATNUM=10",
        "-DCRYPTO_NAMESPACE(x)=x",
        includeFlag (cDir / "mceliece348864"),
---       includeFlag "/usr/local/Cellar/openssl@1.1/1.1.1l_1/include",
        includeFlag (cDir / "keccak" / "include"),
        includeFlag (cDir / "openssl" / "include")]
 
@@ -73,8 +71,6 @@ extern_lib libkeccak := do
   let libFile := buildLibDir / "libkeccak.a"
   let dependencies ← keccakFiles.mapM keccakTarget
   buildStaticLib libFile dependencies
-
---"-arch x86_64",
 
 def opensslDefFlags : Array String :=
     #["-O3",
@@ -106,9 +102,11 @@ require smt from git
 lean_lib LeanCrypto where
   roots := #[`Crypto]
 
-@[defaultTarget]
 lean_exe mceliece where
   root := `McEliece
+
+lean_exe aes_test where
+  root := `AESTEST
 
 def getTestOutput (fname : FilePath) : ScriptM IO.Process.Output := do
   -- Note: this only works on Unix since it needs the shared library `libSmt`

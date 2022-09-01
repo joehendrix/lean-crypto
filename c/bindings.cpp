@@ -70,6 +70,26 @@ extern "C"
 void AES_encrypt(const unsigned char *in, unsigned char *out,
                  const AES_KEY *key);
 
+extern "C" lean_obj_res lean_AES128_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
+    assert(lean_sarray_size(key_obj) == 16);
+    const uint8_t* key = lean_sarray_cptr(key_obj);
+
+    assert(lean_sarray_size(v_obj) == 16);
+    const uint8_t* ctr = lean_sarray_cptr(v_obj);
+
+    lean_obj_res buffer_obj = lean_alloc_sarray1(1, 16);
+    uint8_t* buffer = lean_sarray_cptr(buffer_obj);
+    assert(key);
+
+    AES_KEY ks;
+    memset(&ks, 0, sizeof(AES_KEY));
+    int ret = AES_set_encrypt_key(key, 128, &ks);
+    assert(ret >= 0);
+    AES_encrypt(ctr, buffer, &ks);
+
+    return buffer_obj;
+}
+
 extern "C" lean_obj_res lean_AES256_ECB(b_lean_obj_arg key_obj, b_lean_obj_arg v_obj) {
     assert(lean_sarray_size(key_obj) == 32);
     const uint8_t* key = lean_sarray_cptr(key_obj);
