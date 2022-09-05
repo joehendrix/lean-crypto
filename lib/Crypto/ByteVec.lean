@@ -1,4 +1,5 @@
 import Crypto.ByteArray
+import Crypto.List
 import Crypto.UInt8
 
 structure ByteVec (n:Nat) where
@@ -28,7 +29,7 @@ def zeros (n:Nat) : ByteVec n := ⟨ByteArray.replicate n 0, ByteArray.size_repl
 def sequence (n:Nat) : ByteVec n := ⟨ByteArray.sequence n, ByteArray.size_sequence n⟩
 
 theorem eq_of_val_eq {n:Nat} : ∀ {x y : ByteVec n}, Eq x.data y.data → Eq x y
-  | ⟨x,_⟩, _, rfl => rfl
+  | ⟨_,_⟩, _, rfl => rfl
 
 theorem ne_of_val_ne {n:Nat} {i j : ByteVec n} (h : Not (Eq i.data j.data)) : Not (Eq i j) :=
   λh' => absurd (h' ▸ rfl) h
@@ -48,7 +49,13 @@ instance (n:Nat) : ToString (ByteVec n) := ⟨ByteVec.toString⟩
 
 instance (n:Nat) : Inhabited (ByteVec n) := ⟨ByteVec.zeros n⟩
 
-protected def fromList (l:List UInt8) : ByteVec (l.length) := ⟨fromList l, by simp [ByteArray.size_from_list]⟩
+protected def ofList (l:List UInt8) (p: l.length = n) : ByteVec n :=
+  let h q : (ofList l q : ByteArray).size = n := by
+          simp only [ByteArray.size_of_list, p]
+  ⟨ofList l (by trivial), h _⟩
+
+instance : OfList (ByteVec n) UInt8 (λl => l.length = n) where
+  ofList := ByteVec.ofList
 
 protected def append {m n : Nat} : ByteVec m → ByteVec n → ByteVec (m+n)
 | ⟨x,p⟩, ⟨y,q⟩ => ⟨x ++ y, by simp [p,q, ByteArray.size_append]⟩
@@ -111,7 +118,7 @@ instance : Xor (ByteVec n) where
 
 def ofUInt64lsb (v:UInt64) : ByteVec 8 :=
   let byte (i:UInt64) : UInt8 := OfNat.ofNat (v >>> (8 * i)).toNat
-  ByteVec.fromList [byte 0, byte 1, byte 2, byte 3, byte 4, byte 5, byte 6, byte 7]
+  #v[byte 0, byte 1, byte 2, byte 3, byte 4, byte 5, byte 6, byte 7]
 
 protected def toHex {n:Nat} (a:ByteVec n) : String :=
   a.data.foldl (λs b => s ++ b.toHex) ""
@@ -120,8 +127,3 @@ def extractN! {m:Nat} (v:ByteVec m) (l n : Nat) : ByteVec n :=
   ByteVec.generate n (λi => v.get! (l+i))
 
 end ByteVec
-
-syntax "#v[" sepBy(term, ", ") "]" : term
-
-macro_rules
-  | `(#v[ $elems,* ]) => `(ByteVec.fromList [ $elems,* ])

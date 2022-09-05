@@ -1,12 +1,12 @@
 import Crypto.Array
-import Crypto.IsList
+import Crypto.OfList
 import Crypto.List
 import Crypto.Nat
 
 namespace ByteArray
 
 theorem eq_of_val_eq : ∀ {x y : ByteArray}, Eq x.data.data y.data.data → Eq x y
-  | ⟨⟨x⟩⟩, _, rfl => rfl
+  | ⟨⟨_⟩⟩, _, rfl => rfl
 
 theorem val_eq_of_eq {i j : ByteArray} (h : Eq i j) : Eq i.data.data j.data.data :=
   h ▸ rfl
@@ -43,16 +43,15 @@ theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size := by
   apply Array.size_append
 
 @[inline, matchPattern]
-protected def fromList (l : List UInt8) : ByteArray := { data := { data := l } }
+protected def ofList (l : List UInt8) : ByteArray := { data := Array.ofList l }
 
-instance : IsList ByteArray where
-  element := UInt8
-  fromList := ByteArray.fromList
+instance : OfList ByteArray UInt8 (λ_ => true) where
+  ofList l _ := ByteArray.ofList l
 
 theorem size_mkEmpty (n:Nat) : size (mkEmpty n) = 0 := rfl
 
-theorem size_from_list : ∀(l:List UInt8), ByteArray.size (fromList l) = l.length := by
-  simp [fromList, ByteArray.fromList, size]
+theorem size_of_list (l:List UInt8) p : ByteArray.size (OfList.ofList l p) = l.length := by
+  simp only [ofList, ByteArray.ofList, size, Array.ofList]
 
 def replicateAux : ByteArray → Nat → UInt8 → ByteArray
 | a, 0, _ => a
@@ -61,20 +60,20 @@ def replicateAux : ByteArray → Nat → UInt8 → ByteArray
 def replicateNoList (n:Nat) (c:UInt8) : ByteArray := replicateAux (ByteArray.mkEmpty n) n c
 
 @[implementedBy replicateNoList]
-def replicate (n:Nat) (c:UInt8) : ByteArray := fromList (List.replicate n c)
+def replicate (n:Nat) (c:UInt8) : ByteArray := ofList (List.replicate n c) (by trivial)
 
 theorem replicateAuxAsList (a:ByteArray) (j: Nat) (c:UInt8)
-    : replicateAux a j c = a ++ fromList (List.replicate j c) := by
+    : replicateAux a j c = a ++ ofList (List.replicate j c) p := by
   revert a
   induction j with
   | zero =>
     intro a
     apply ByteArray.eq_of_val_eq
-    simp [replicateAux, append_data, Array.append_data, fromList, ByteArray.fromList]
+    simp [replicateAux, append_data, Array.append_data, ofList, ByteArray.ofList, Array.ofList]
   | succ n nh =>
     intro a
     apply ByteArray.eq_of_val_eq
-    simp [replicateAux, nh, append_data, Array.append_data, fromList, ByteArray.fromList]
+    simp [replicateAux, nh, append_data, Array.append_data, ofList, ByteArray.ofList, Array.ofList]
     simp [push, Array.push, List.concat_to_cons]
 
 theorem replicateNoListCorrect (n: Nat) (c:UInt8)
@@ -85,7 +84,7 @@ theorem replicateNoListCorrect (n: Nat) (c:UInt8)
   trivial
 
 theorem size_replicate (n:Nat) (c:UInt8) : (replicate n c).size = n := by
-  simp [replicate, size, fromList, ByteArray.fromList]
+  simp only [replicate, size_of_list, List.length_replicate]
 
 def sequenceAux : ByteArray → Nat → ByteArray
 | a, 0 => a
@@ -187,16 +186,16 @@ theorem size_generateAux {n:Nat} (f:Fin n → UInt8) {a:ByteArray} (j:Nat) (p:a.
   revert a p
   induction j with
   | zero =>
-    intros a p
+    intros _a p
     exact p
   | succ j ind =>
-    intros a p
+    intros _a _p
     exact ind _
 
 theorem size_generate (n:Nat) (f:Fin n → UInt8) : (generate n f).size = n := by
   exact (size_generateAux _ _ _)
 
-def generateMapAux {n:Nat} (f:Fin n → ByteArray) : ∀(a:ByteArray) (i j : Nat), i + j = n → ByteArray
+def generateMapAux {n:Nat} (f:Fin n → ByteArray) : ∀(_a:ByteArray) (i j : Nat), i + j = n → ByteArray
 | a, _, 0, _ => a
 | a, i, Nat.succ j, p =>
   have p2 : Nat.succ (j + i) = n := by

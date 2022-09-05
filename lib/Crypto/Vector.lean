@@ -1,6 +1,7 @@
 -- This module introduces arrays with an explicit type parameter for storing length.
 import Crypto.Array
 import Crypto.Nat
+import Crypto.OfList
 import Crypto.Range
 import Crypto.Hadamard
 
@@ -138,7 +139,8 @@ def hadProd [h:HMul α β γ] (u:Vector n α) (v:Vector n β) : Vector n γ :=
 instance [HMul α β γ] : HadamardProduct (Vector n α) (Vector n β) (Vector n γ) where
   hadProd := Vector.hadProd
 
-def flatten (v : Vector m (Vector n α)) : Vector (m*n) α :=
+protected
+def join (v : Vector m (Vector n α)) : Vector (m*n) α :=
   Vector.generate (m*n) λi =>
     have n_pos : 0 < n := by
             have p := i.isLt
@@ -148,5 +150,13 @@ def flatten (v : Vector m (Vector n α)) : Vector (m*n) α :=
             | succ x =>
               exact (Nat.zero_lt_succ _)
     (v.get ⟨i.val/n, Nat.mul_div_lt i.isLt⟩).get ⟨i.val%n, Nat.mod_lt _ n_pos⟩
+
+protected def ofList {α} (l:List α) (p: l.length = n) : Vector n α :=
+  let h q : (ofList l q : Array α).size = n := by
+          simp only [Array.size_of_list, p]
+  ⟨ofList l (by trivial), h _⟩
+
+instance : OfList (Vector n α) α (λl => l.length = n) where
+  ofList := Vector.ofList
 
 end Vector

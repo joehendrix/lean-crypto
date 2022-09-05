@@ -94,7 +94,7 @@ extern_lib libcrypto := do
   buildStaticLib libFile dependencies
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"cf2e683c25eba2d798b2460d5703a63db72272c0"
+  "https://github.com/leanprover-community/mathlib4"@"2d78fedb9593008d86468a8186625258872247a1"
 
 require smt from git
   "https://github.com/ufmg-smite/lean-smt"@"main"

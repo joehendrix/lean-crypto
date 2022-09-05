@@ -1,4 +1,5 @@
 import Crypto.Fin
+import Crypto.OfList
 
 theorem ite_same {α:Type} (p:Prop) [h:Decidable p] (a:α) : (if p then a else a) = a := by
   cases h with
@@ -177,5 +178,14 @@ theorem size_setD (a:Array α) : (a.setD i e).size = a.size := by
 
 theorem size_set! (a:Array α) : (a.set! i e).size = a.size := by
   simp [set!, size_setD]
+
+@[inline, matchPattern]
+protected def ofList (l : List α) : Array α := { data := l }
+
+instance {α:Type _} : OfList (Array α) α (λ_ => true) where
+  ofList l _ := Array.ofList l
+
+theorem size_of_list (l:List α) p : Array.size (OfList.ofList l p) = l.length := by
+  simp only [ofList, Array.ofList, size]
 
 end Array
