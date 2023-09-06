@@ -1,0 +1,10 @@
+{"version": 2,
+ "packages":
+ [{"url": "https://github.com/leanprover-community/mathlib4",
+   "rev": "cf2e683c25eba2d798b2460d5703a63db72272c0",
+   "name": "mathlib",
+   "inputRev": "cf2e683c25eba2d798b2460d5703a63db72272c0"},
+  {"url": "https://github.com/ufmg-smite/lean-smt",
+   "rev": "219fffdf8d850fcb29c46e226d623def13848618",
+   "name": "smt",
+   "inputRev": "main"}]}

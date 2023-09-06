@@ -110,19 +110,11 @@ lean_exe mceliece where
 def getTestOutput (fname : FilePath) : ScriptM IO.Process.Output := do
   -- Note: this only works on Unix since it needs the shared library `libSmt`
   -- to also load its transitive dependencies.
-  let getDynlib nm : ScriptM FilePath := do
-    let some ret := (← findModule? nm).map Module.dynlibFile
-      | throwThe IO.Error "cannot find module Smt"
-    return ret
-  let dynlibs := #[
-    ← getDynlib `Std,
-    ← getDynlib `Qq,
-    ← getDynlib `Aesop,
-    ← getDynlib `Smt    
-  ]
+  let some smtDynlib := (← findModule? `Smt).map Module.dynlibFile
+    | throwThe IO.Error "cannot find module Smt"
   IO.Process.output {
     cmd := (← getLean).toString
-    args := dynlibs.map (s!"--load-dynlib={·}") ++ #[fname.toString],
+    args := #[s!"--load-dynlib={smtDynlib}", fname.toString],
     env := (← getAugmentedEnv)
   }
 
