@@ -8,7 +8,7 @@ lake build mceliece
 cmp --silent tests/mceliece/kat_kem.req.golden tmp/kat_kem.req || echo "Req files are different"
 cmp --silent tests/mceliece/kat_kem.rsp.golden tmp/kat_kem.rsp || echo "Rsp files are different"
 
-lake build Smt:shared
+lake build +Smt:dynlib
 lake run runTest tests/aes/GF256Pow.lean
 # TODO: times out
 # lake run runTest tests/aes/SBox.lean
