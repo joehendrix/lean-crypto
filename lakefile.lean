@@ -97,23 +97,21 @@ extern_lib libcrypto := do
   let dependencies ← opensslFiles.mapM opensslTarget
   buildStaticLib libFile dependencies
 
-require mathlib from git
-  "https://github.com/leanprover-community/mathlib4"@"cf2e683c25eba2d798b2460d5703a63db72272c0"
-
 require smt from git
   "https://github.com/ufmg-smite/lean-smt"@"main"
 
 lean_lib LeanCrypto where
   roots := #[`Crypto]
 
-@[defaultTarget]
+@[default_target]
 lean_exe mceliece where
   root := `McEliece
 
 def getTestOutput (fname : FilePath) : ScriptM IO.Process.Output := do
   -- Note: this only works on Unix since it needs the shared library `libSmt`
   -- to also load its transitive dependencies.
-  let smtDynlib := (← findModule? `Smt).get!.dynlibFile
+  let some smtDynlib := (← findModule? `Smt).map Module.dynlibFile
+    | throwThe IO.Error "cannot find module Smt"
   IO.Process.output {
     cmd := (← getLean).toString
     args := #[s!"--load-dynlib={smtDynlib}", fname.toString],

@@ -79,12 +79,6 @@ end Nat
 
 /-! Permutations -/
 
-theorem List.perm_append_singleton {a : α} {l : List α} : l ++ [a] ~ a :: l := by
-  suffices l ++ [a] ~ a :: (l ++ []) by
-    rw [List.append_nil] at this
-    assumption
-  apply perm_middle
-
 theorem List.perm_reverse {l : List α} : l.reverse ~ l := by
   induction l with
   | nil => exact .refl []
@@ -102,7 +96,7 @@ def List.rangeModel : Nat → List Nat
 
 @[csimp]
 theorem List.rangeModel_eq_range : @rangeModel = @range :=
-  have aux (n : Nat) (r : List Nat) : rangeAux n r = rangeModel n ++ r := by
+  have aux (n : Nat) (r : List Nat) : range.loop n r = rangeModel n ++ r := by
     induction n generalizing r with
     | zero => simp [rangeModel]
     | succ n ih => simp [rangeModel, ih, append_assoc]
@@ -127,16 +121,6 @@ theorem List.rangeModel_succ {n : Nat} : rangeModel (n+1) = rangeModel n ++ [n] 
 
 @[simp] theorem List.getD_cons : List.getD (x :: xs) i d = if i = 0 then x else List.getD xs (i-1) d :=
   sorry
-
-lemma List.foldl_ext (f g : α → β → α) (a : α)
-  {l : List β} (H : ∀ a : α, ∀ b ∈ l, f a b = g a b) :
-  l.foldl f a = l.foldl g a :=
-by
-  induction l generalizing a with
-  | nil => rfl
-  | cons x xs ih =>
-    unfold foldl
-    rw [ih (f a x) (fun a b hB => H a b <| mem_cons_of_mem x hB), H a x <| mem_cons_self x xs]
 
 -- by Mario
 def List.withPred (P : α → Prop) : (as : List α) → (h : (a : α) → a ∈ as → P a) → List { x : α // P x }
@@ -172,12 +156,6 @@ theorem List.foldl_eq_of_comm_of_perm {l₁ l₂ : List β} (f : α → β → �
   | cons _ _ ih => simp [foldl, ih]
   | swap => simp [foldl, H]
   | trans _ _ ih₁ ih₂ => simp [ih₁, ih₂]
-
-@[simp]
-theorem List.foldl_append (f : α → β → α) :
-    ∀ (a : α) (l₁ l₂ : List β), foldl f a (l₁ ++ l₂) = foldl f (foldl f a l₁) l₂
-  | a, []     , l₂ => rfl
-  | a, (b::l₁), l₂ => by simp [cons_append, foldl, foldl_append f (f a b) l₁ l₂]
 
 /-! Fin and Fin ranges -/
 
@@ -218,7 +196,9 @@ theorem List.rangeFinUpTo_complete (m : Nat) (i : Fin m) (h : m ≤ n)
     | isTrue hEq => simp [rangeFinUpTo, hEq]
     | isFalse hNeq => 
       let i' : Fin m := ⟨i, Nat.lt_of_le_of_ne (Nat.le_of_lt_succ i.isLt) hNeq⟩
-      simp [rangeFinUpTo, ih i' (Nat.le_of_succ_le h)]
+      have := ih i' (Nat.le_of_succ_le h)
+      simp [rangeFinUpTo]
+      exact Or.inl this
 
 theorem List.rangeFin_complete (n : Nat) (i : Fin n) : i ∈ rangeFin n :=
   rangeFinUpTo_complete n i (Nat.le_refl _)

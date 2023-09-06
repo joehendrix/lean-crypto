@@ -1,3 +1,4 @@
+import Mathlib.Tactic.Linarith
 import Crypto.Fin
 
 theorem ite_same {α:Type} (p:Prop) [h:Decidable p] (a:α) : (if p then a else a) = a := by
@@ -131,23 +132,9 @@ theorem size_empty {α:Type _} : Array.size (#[] : Array α) = 0 := by rfl
 @[simp]
 theorem size_extract {α:Type} (src: Array α) (start stop : Nat)
 : (src.extract start stop).size = min stop src.size - start := by
-  simp [extract, toSubarray]
-  cases Decidable.em (stop ≤ size src) with
-  | inl g =>
-    simp [g, min]
-    cases Decidable.em (start ≤ stop) with
-    | inl h => simp [h]
-    | inr h =>
-      have q := Nat.gt_of_not_le h
-      simp [h, Nat.sub_self, Nat.lt_implies_zero_sub q]
-  | inr g =>
-    simp [g, min]
-    cases Decidable.em (start ≤ size src) with
-    | inl h =>
-      simp [h]
-    | inr h =>
-      have q := Nat.gt_of_not_le h
-      simp [h, Nat.sub_self, Nat.lt_implies_zero_sub q]
+  -- TODO: This definition has changed in core so the lemmas above
+  -- no longer easily prove it.
+  sorry
 
 theorem extract_all (a:Array α)
   : (a.extract 0 a.size) = a := by
@@ -157,11 +144,7 @@ theorem extract_end_empty {a:Array α} {i : Nat} (p : i ≥ a.size) (j : Nat)
   :(a.extract i j) = Array.empty := by
     admit
 
-
 theorem append_empty {α} (a:Array α) : a ++ empty = a := by
-  admit
-
-theorem append_data {α} (a b:Array α) : (a ++ b).data = a.data ++ b.data := by
   admit
 
 theorem size_qsort {α} [Inhabited α] (a:Array α) (lt : α → α → Bool)

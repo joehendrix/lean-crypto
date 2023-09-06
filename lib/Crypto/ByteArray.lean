@@ -32,7 +32,6 @@ theorem append_data : ∀(x y:ByteArray), (x ++ y).data = x.data ++ y.data
   simp [ByteArray.append, copySlice]
   have p : a.size + b.size ≥ a.size := Nat.le_add_right a.size b.size
   simp [size, Array.extract_all, Array.extract_end_empty p, Array.append_empty (a++b) ]
-  trivial
 
 theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size := by
   intro x y
@@ -42,7 +41,7 @@ theorem size_append : ∀(x y:ByteArray), (x ++ y).size = x.size + y.size := by
   simp only [q]
   apply Array.size_append
 
-@[inline, matchPattern]
+@[inline, match_pattern]
 protected def fromList (l : List UInt8) : ByteArray := { data := { data := l } }
 
 instance : IsList ByteArray where
@@ -60,11 +59,11 @@ def replicateAux : ByteArray → Nat → UInt8 → ByteArray
 
 def replicateNoList (n:Nat) (c:UInt8) : ByteArray := replicateAux (ByteArray.mkEmpty n) n c
 
-@[implementedBy replicateNoList]
+@[implemented_by replicateNoList]
 def replicate (n:Nat) (c:UInt8) : ByteArray := fromList (List.replicate n c)
 
 theorem replicateAuxAsList (a:ByteArray) (j: Nat) (c:UInt8)
-    : replicateAux a j c = a ++ fromList (List.replicate j c) := by
+    : replicateAux a j c = a ++ fromList (α := ByteArray) (List.replicate j c) := by
   revert a
   induction j with
   | zero =>
@@ -126,16 +125,9 @@ theorem size_extract : ∀(a:ByteArray) (s e : Nat), (a.extract s e).size = min 
               simp only [Nat.add_sub_of_le h2]
               exact h1
       simp [h3]
-      simp only [Nat.add_sub_cancel_left]
     | inr h2 =>
       have s3 := Nat.le_of_lt (Nat.gt_of_not_le h2)
       simp [h1, Nat.le_implies_zero_sub, s3]
-      cases Decidable.em (s ≤ a.size) with
-      | inl h3 =>
-        simp [h3]
-      | inr h3 =>
-        have s3 := Nat.le_of_lt (Nat.gt_of_not_le h3)
-        simp [Nat.le_implies_zero_sub, s3, h3]
   | inr h1 =>
     cases Decidable.em (s ≤ e) with
     | inl h2 =>
@@ -143,20 +135,13 @@ theorem size_extract : ∀(a:ByteArray) (s e : Nat), (a.extract s e).size = min 
     | inr h2 =>
       have n_le_s : e ≤ s := Nat.le_of_lt (Nat.gt_of_not_le h2)
       simp [h1, Nat.le_implies_zero_sub, n_le_s]
-      cases Decidable.em (s ≤ a.size) with
-      | inl h3 =>
-        have h11 : a.size ≤ e := Nat.le_of_lt (Nat.gt_of_not_le h1)
-        have h31 : a.size ≤ s := Nat.le_trans h11 n_le_s
-        simp [h3, Nat.le_implies_zero_sub, h31]
-      | inr h3 =>
-        simp [h3]
 
 def extractN (a:ByteArray) (s n : Nat) : ByteArray :=
   let b := a.extract s (s+n)
   b ++ replicate (n-b.size) 0
 
 theorem size_extractN (a:ByteArray) (s n : Nat) : (a.extractN s n).size = n := by
-  simp [extractN, size_append, size_extract, size_replicate, min]
+  simp [extractN, size_append, size_extract, size_replicate, Nat.min_def]
   cases Decidable.em (s + n ≤ a.size) with
   | inl h1 =>
     simp [h1, Nat.add_sub_self_left]

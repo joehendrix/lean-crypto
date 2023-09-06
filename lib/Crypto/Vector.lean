@@ -109,12 +109,7 @@ def extractN! [Inhabited α] (a : Vector n α) (s m:Nat) : Vector m α :=
         have p : min (s + m) (Array.size a.data) - s ≤ m := by
               apply Nat.sub_le_of_le_add
               simp only [Nat.add_comm s m, min]
-              cases Decidable.em (m + s ≤ a.data.size) with
-              | inl h =>
-                simp [h]
-              | inr h =>
-                simp [h]
-                exact Nat.le_of_lt (Nat.gt_of_not_le h)
+              cases Decidable.em (m + s ≤ a.data.size) <;> next h => simp [h]
         simp [Nat.add_sub_of_le p]
   ⟨b ++ e, pr⟩
 
