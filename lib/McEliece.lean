@@ -9,7 +9,7 @@ def main (args:List String): IO Unit := do
   | [reqPath, rspPath] => do
       let mut drbg0 := randombytesInit (byteSequence 48);
       let mut seedArray : Array Seed := #[]
-      let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write false
+      let fpReq ← IO.FS.Handle.mk reqPath IO.FS.Mode.write
       for i in [0:10] do
         let (seed, drbg2) := PRNG.randombytes drbg0 48
         drbg0 := drbg2
@@ -20,7 +20,7 @@ def main (args:List String): IO Unit := do
         fpReq.putStrLn "ct ="
         fpReq.putStrLn "ss =\n"
         seedArray := seedArray.push seed
-      let fpRsp ← IO.FS.Handle.mk rspPath IO.FS.Mode.write false
+      let fpRsp ← IO.FS.Handle.mk rspPath IO.FS.Mode.write
       fpRsp.putStrLn $ s!"# kem/{Mceliece.Ref348864.name}\n"
       for i in [0:10], seed in seedArray do
         let (key, drbg) ←
