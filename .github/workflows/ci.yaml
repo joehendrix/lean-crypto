@@ -45,6 +45,8 @@ jobs:
       run: brew install elan
     - name: Checkout
       uses: actions/checkout@v2
+    - name: Retrieve mathlib cache
+      run: lake exe cache get
     - name: Cache build
       uses: actions/cache@v2
       with:
