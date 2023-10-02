@@ -4,7 +4,7 @@ namespace Nat
 @[simp]
 theorem min_same (n : Nat) : min n n = n := by
   have h : n ≤ n := Nat.le.refl
-  simp [min, h]
+  simp [Nat.min_def, h]
 
 @[simp]
 theorem le_implies_zero_sub {m n:Nat} (p : m ≤ n): m - n = 0 := by

@@ -50,10 +50,12 @@ jobs:
       with:
         path: build
         key: ${{ matrix.name }}-build
-    - name: Cache lean_packages
+    - name: Cache lake-packages
       uses: actions/cache@v2
       with:
-        path: lean_packages
-        key: ${{ matrix.name }}-lean_packages
+        path: lake-packages
+        key: ${{ matrix.name }}-lake-packages
+    - name: Retrieve mathlib cache
+      run: lake exe cache get
     - name: Run tests
       run: ./scripts/test.sh

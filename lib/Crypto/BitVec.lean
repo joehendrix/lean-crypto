@@ -12,7 +12,7 @@ def get_lsb (x : BitVec m) (i : Fin m) : Bool :=
 def lsb_getAux (x : BitVec m) (i : Nat) : Bool :=
   (x.val &&& (1 <<< i)) ≠ 0
 
-@[implementedBy lsb_getAux]
+@[implemented_by lsb_getAux]
 def lsb_get! (x : BitVec m) (i : Nat) : Bool :=
   BitVec.lsbGet x i
 
@@ -124,11 +124,11 @@ protected def generate_msb (n : Nat) (f : Fin n → Bool) : BitVec n := Id.run d
   protected def toString {n:Nat} (x:BitVec n) : String :=
     if n % 16 = 0 then
       let s := (Nat.toDigits 16 x.val).asString
-      let t := (List.repeat' '0' (n / 16 - s.length)).asString
+      let t := (List.replicate (n / 16 - s.length) '0').asString
       "0x" ++ t ++ s
     else
       let s := (Nat.toDigits 2 x.val).asString
-      let t := (List.repeat' '0' (n - s.length)).asString
+      let t := (List.replicate (n - s.length) '0').asString
       "0b" ++ t ++ s
 
   instance : ToString (BitVec n) := ⟨BitVec.toString⟩

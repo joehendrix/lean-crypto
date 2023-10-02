@@ -13,15 +13,16 @@ example (x : GF256) : GF256.pow2 8 x = x := by
   conv at GF256.pow2.def =>
     intro k x
     rw [ GaloisField2k.mul.GF256.specialization ]
-  save
+  -- TODO: breaks mvar context
+  -- save
 
   extract_def polyMod
   specialize_def GF2BVPoly.polyMod [16, 8]
-  save
+  -- save
 
   extract_def polyMul
   specialize_def GF2BVPoly.polyMul [8, 8]
-  save
+  -- save
 
   conv at GaloisField2k.mul.GF256.def =>
     intro a b
@@ -34,5 +35,5 @@ example (x : GF256) : GF256.pow2 8 x = x := by
     GF2BVPoly.polyMul.«8».«8»,
     GF2BVPoly.polyMod.«16».«8»
   ] 
-    
+
   sorry

@@ -87,24 +87,24 @@ example (x y : GF) : GF4096.ofGF (x * y) = (GF4096.ofGF x) * (GF4096.ofGF y) := 
   show (GF4096.ofGF (GF.mul x y)) = GaloisField2k.mul (GF4096.ofGF x) (GF4096.ofGF y)
 
   extract_def GF4096.ofGF
-    specialize_def GF4096.ofGF [] blocking [@Subtype.val, UInt16.val]
-    rw [GF4096.ofGF.specialization]
-    rw [GF4096.ofGF.specialization]
-    rw [GF4096.ofGF.specialization]
-    save
+  specialize_def Mceliece.Ref348864.GF4096.ofGF [] blocking [@Subtype.val, UInt16.val]
+  rw [Mceliece.Ref348864.GF4096.ofGF.specialization]
+  rw [Mceliece.Ref348864.GF4096.ofGF.specialization]
+  rw [Mceliece.Ref348864.GF4096.ofGF.specialization]
+  save
 
   extract_def GF.mul
-    specialize_def Mceliece348864Ref.GF.mul [] blocking [
-      @Subtype.val,
-      UInt16.toUInt32,
-      GF.red
-    ]
-    save
+  specialize_def Mceliece.Ref348864.GF.mul [] blocking [
+    @Subtype.val,
+    UInt16.toUInt32,
+    GF.red
+  ]
+  save
 
   extract_def GaloisField2k.mul
-    specialize_def GaloisField2k.mul [GF4096] blocking [@polyMod, @polyMul]
-      rw [GaloisField2k.mul.GF4096.specialization]
-      save
+  specialize_def GaloisField2k.mul [GF4096] blocking [@polyMod, @polyMul]
+  rw [GaloisField2k.mul.GF4096.specialization]
+  save
 
   smt_show [
     GF4096.ofGF,

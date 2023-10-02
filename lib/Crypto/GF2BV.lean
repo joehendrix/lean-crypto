@@ -28,12 +28,12 @@ pmult x y = last zs
 ``` -/
 def polyMul (a : BitVec w) (b : BitVec v) : BitVec (w+v) := Id.run do
   let wOut := w + v
-  let_opaque a := a.zeroExtend wOut (Nat.le_add_right _ _)
+  let a := (let_opaque r := a.zeroExtend v; r)
   let mut ret : BitVec wOut := 0
   -- fold over the bits of b starting at MSB
   for i in List.range v |>.reverse do
-    let_opaque tmp := ret <<< 1
-    opaque ret := if b.lsbGet i then polyAdd tmp a else tmp
+    let tmp := (let_opaque tmp := ret <<< 1; tmp)
+    ret := (let_opaque ret := if b.lsbGet i then polyAdd tmp a else tmp; ret)
   return ret
 
 /-- Modulo operation in GF(2)[x] translated from Cryptol reference.
@@ -144,7 +144,7 @@ def addMany (as : Array F) : F :=
 
 -- TODO: use specialized polyMod instead
 def irredFull (F : GaloisField2k) :=
-  BitVec.ofNat (F.k+1) (1 <<< F.k) ||| F.irred.zeroExtend (F.k+1) (Nat.le_succ _)
+  BitVec.ofNat (F.k+1) (1 <<< F.k) ||| F.irred.zeroExtend 1
 
 def mul (a b : F) : F := polyMod (polyMul a b) (irredFull F)
 
